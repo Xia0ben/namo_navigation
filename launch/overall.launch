@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Specify robot-specific topics-->
+    <arg name="scan_topic" default="scan" />
+    <arg name="map_topic" default="map" />
+    <arg name="tf_topic" default="tf" />
+    <arg name="pose_topic" default="amcl_pose" />
+    
+    <arg name="map_file" default="$(find husky_navigation)/maps/my_map.yaml"/>
+    
+    <!-- Start AMCL. ALWAYS DO THIS BEFORE STARTING MAP !!!-->
+    <include file="$(find namo_navigation)/launch/amcl.launch">
+        <arg name="scan_topic" value="$(arg scan_topic)"/>
+        <arg name="map_file" value="$(arg map_file)"/>
+    </include>
+    
+
+    
+    <!-- Start local planner -->
+    <node pkg="namo_navigation" type="local_planner.py" name="map" output="screen">
+    </node>
+</launch>
