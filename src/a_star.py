@@ -36,12 +36,12 @@ class AStar:
 
     @staticmethod
     def dist_between(a, b):
-        return manhattan_distance(a, b)
+        return AStar.manhattan_distance(a, b)
     
     
     @staticmethod
     def heuristic_cost_estimate(a, b):
-        return manhattan_distance(a, b)
+        return AStar.manhattan_distance(a, b)
     
     
     @staticmethod
@@ -61,6 +61,7 @@ class AStar:
         while current in came_from:
             current = came_from[current]
             total_path.append(current)
+        total_path.reverse()
         return total_path
     
     
@@ -89,7 +90,7 @@ class AStar:
     
         # The dictionary that remembers for each node, the total cost of getting from the start node to the goal
         # by passing by that node. That value is partly known, partly heuristic.
-        fscore = {start:heuristic_cost_estimate(start, goal)}
+        fscore = {start:AStar.heuristic_cost_estimate(start, goal)}
     
         # The set of currently discovered nodes that are not evaluated yet.
         open_heap = []
@@ -104,7 +105,7 @@ class AStar:
     
             # Exit early if goal is reached
             if current == goal:
-                return reconstruct_path(came_from, current)
+                return AStar.reconstruct_path(came_from, current)
     
             close_set.add(current)
     
@@ -118,16 +119,16 @@ class AStar:
                     if 0 <= neighbor[1] < map_2d.shape[1]:
                         # TODO This is here that the cost of traversing a node can be used
                         # Do not consider traversing neighbor if it is an obstacle
-                        if map_2d[neighbor[0]][neighbor[1]] >= ROS_COST_POSSIBLY_CIRCUMSCRIBED:
+                        if map_2d[neighbor[0]][neighbor[1]] >= AStar.ROS_COST_POSSIBLY_CIRCUMSCRIBED:
                             continue
                         # Consider but apply cost
-                        elif map_2d[neighbor[0]][neighbor[1]] >= ROS_COST_POSSIBLY_NONFREE:
+                        elif map_2d[neighbor[0]][neighbor[1]] >= AStar.ROS_COST_POSSIBLY_NONFREE:
                             extra_cost_ratio = (1.0 + float(map_2d[neighbor[0]][neighbor[1]]) /
-                                                float(ROS_COST_POSSIBLY_CIRCUMSCRIBED - 1))
-                            cost_between_current_and_neighbor = dist_between(current, neighbor) * extra_cost_ratio
+                                                float(AStar.ROS_COST_POSSIBLY_CIRCUMSCRIBED - 1))
+                            cost_between_current_and_neighbor = AStar.dist_between(current, neighbor) * extra_cost_ratio
                         # Consider without cost
                         else:
-                            cost_between_current_and_neighbor = dist_between(current, neighbor)
+                            cost_between_current_and_neighbor = AStar.dist_between(current, neighbor)
                     else:
                         # Neighbor is outside of map in y axis
                         continue
@@ -154,7 +155,7 @@ class AStar:
                     came_from[neighbor] = current
                     came_from_direction[neighbor] = new_direction
                     gscore[neighbor] = tentative_g_score
-                    fscore[neighbor] = tentative_g_score + heuristic_cost_estimate(neighbor, goal)
+                    fscore[neighbor] = tentative_g_score + AStar.heuristic_cost_estimate(neighbor, goal)
                     heappush(open_heap, (fscore[neighbor], neighbor))
     
         return []
@@ -166,31 +167,3 @@ class AStar:
         for point in path:
             matrix[point[0]][point[1]] = -1
         print(matrix)
-    
-    
-'''Here is an example of using the algorithm with a numpy array,
-   astar(map_2d, start, destination)
-   astar function returns a list of points (shortest path)'''
-# nmap = numpy.array([
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-#     [254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254,  0 , 254],
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-#     [254,  0 , 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254],
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-#     [254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254,  0 , 254],
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-#     [254,  0 , 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254],
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-#     [254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254, 254,  0 , 254],
-#     [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ,  0 ]])
-
-
-nmap = numpy.array([
-    [ 0 ,  0 , 254, 254,  0 ,  0 ],
-    [ 0 ,  0 , 100, 100,  0 ,  0 ],
-    [ 0 ,  0 ,  0 ,  0 ,  0 ,  0 ],
-    [ 0 ,  0 ,  50,  50,  0 ,  0 ],
-    [ 0 ,  0 ,  50,  50,  0 ,  0 ]])
-path = astar(nmap, (0, 0), (4, 5))
-
-print_path(nmap, path)
