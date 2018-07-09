@@ -13,6 +13,7 @@ import numpy
 
 # My own Classes
 from global_planner import GlobalPlanner
+from local_planner import LocalPlanner
 from multilayered_map import MultilayeredMap
 from plan import Plan
 
@@ -37,6 +38,7 @@ class NavManager:
         self.static_map = None
         self.navigation_map = None
         self.global_planner = GlobalPlanner()
+        self.local_planner = LocalPlanner()
 
         # Initialize map
         while self.static_map is None:
@@ -103,6 +105,9 @@ class NavManager:
         except IndexError as e:
             raise e
 
+    def _execute_plan(self, optimal_plan):
+        self.local_planner.follow_path(optimal_plan)
+
     def _optimized(init_robot_pose, goal_robot_pose):
         # Current state
         current_robot_pose = init_robot_pose
@@ -112,6 +117,7 @@ class NavManager:
             self.global_planner.make_plan(self.navigation_map.merged_occ_grid, init_robot_pose, goal_robot_pose),
             is_manipulation = False, resolution = self.navigation_map.resolution,
             move_cost = self.move_cost, push_cost = self.push_cost)
+        is_moving = False
 
         # While check goal is reached
         while not _is_goal_app_reached(current_robot_pose, goal_robot_pose):
@@ -167,7 +173,13 @@ class NavManager:
                     index_EL = index_EL + 1
                     # Endwhile we need to evaluate obstacles
 
+            if not is_moving:
+                self._execute_plan(optimal_plan)
+                is_moving = True
+
+            current_robot_pose = _get_current_pose(self)
             # R \gets$ Next step in $optimal_plan$ FIXME Have the robot advance one step in the plan
+
             # Endwhile check goal is reached
 
 
