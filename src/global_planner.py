@@ -26,7 +26,9 @@ import numpy
 import copy
 from heapq import *
 
-class AStar:
+from utils import Utils
+
+class GlobalPlanner:
     ROS_COST_LETHAL = 254
     ROS_COST_INSCRIBED = 253
     ROS_COST_POSSIBLY_CIRCUMSCRIBED = 128
@@ -34,28 +36,49 @@ class AStar:
     ROS_COST_FREE_SPACE = 0
 
 
-    @staticmethod
-    def dist_between(a, b):
-        return AStar.manhattan_distance(a, b)
+    def __init__(self):
+        pass
+    
+    def make_plan(self, occupancy_grid, start_pose, end_pose):
+        # Convert input format to usable format for astar algorithm
+        map_2d = numpy.array(occupancy_grid.data).reshape(
+            (occupancy_grid.info.height, occupancy_grid.info.width))
+            
+        resolution = occupancy_grid.info.resolution
+        frame_id = occupancy_grid.header.frame_id
+        
+        start_grid_coords = (int(start_pose.pose.position.x / resolution),
+                       int(start_pose.pose.position.y / resolution))
+                       
+        end_grid_coords = (int(end_pose.pose.position.x / resolution),
+                     int(end_pose.pose.position.y / resolution))
+        
+        # Execute A*
+        astar_path = self.astar(map_2d, start_grid_coords, end_grid_coords, restrictTo4Neighbors = True)
+        
+        # Convert A* output to standard ROS path
+        ros_path = Utils.ros_path_from_map_path(astar_path, start_pose, end_pose, resolution, frame_id)
+        
+        return ros_path
+        
+
+    def _dist_between(self, a, b):
+        return self._manhattan_distance(a, b)
     
     
-    @staticmethod
-    def heuristic_cost_estimate(a, b):
-        return AStar.manhattan_distance(a, b)
+    def _heuristic_cost_estimate(self, a, b):
+        return self._manhattan_distance(a, b)
     
     
-    @staticmethod
-    def euclidean_distance(a, b):
+    def _euclidean_distance(self, a, b):
         return (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2
     
     
-    @staticmethod
-    def manhattan_distance(a, b):
+    def _manhattan_distance(self, a, b):
         return abs(b[0] - a[0]) + abs(b[1] - a[1])
     
     
-    @staticmethod
-    def reconstruct_path(came_from, end):
+    def _reconstruct_path(self, came_from, end):
         total_path = [end]
         current = end
         while current in came_from:
@@ -65,10 +88,19 @@ class AStar:
         return total_path
     
     
-    @staticmethod
-    def astar(map_2d, start, goal):
+    def print_path(self, nmap, path):
+        matrix = copy.deepcopy(nmap)
+        for point in path:
+            matrix[point[0]][point[1]] = -1
+        print(matrix)
+
+    
+    def astar(self, map_2d, start, goal, restrictTo4Neighbors = True):
         # Acceptable transitions from current grid element to neighbors
-        NEIGHBORHOOD = [(0, 1), (0, -1), (1, 0), (-1, 0)] #, (1, 1), (1, -1), (-1, 1), (-1, -1)]
+        if restrictTo4Neighbors:
+            NEIGHBORHOOD = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+        else:
+            NEIGHBORHOOD = [(0, 1), (0, -1), (1, 0), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
     
         # Directions
         DIRECTIONS = [['NW', 'N', 'NE'],
@@ -90,7 +122,7 @@ class AStar:
     
         # The dictionary that remembers for each node, the total cost of getting from the start node to the goal
         # by passing by that node. That value is partly known, partly heuristic.
-        fscore = {start:AStar.heuristic_cost_estimate(start, goal)}
+        fscore = {start:self._heuristic_cost_estimate(start, goal)}
     
         # The set of currently discovered nodes that are not evaluated yet.
         open_heap = []
@@ -105,7 +137,7 @@ class AStar:
     
             # Exit early if goal is reached
             if current == goal:
-                return AStar.reconstruct_path(came_from, current)
+                return self._reconstruct_path(came_from, current)
     
             close_set.add(current)
     
@@ -119,16 +151,16 @@ class AStar:
                     if 0 <= neighbor[1] < map_2d.shape[1]:
                         # TODO This is here that the cost of traversing a node can be used
                         # Do not consider traversing neighbor if it is an obstacle
-                        if map_2d[neighbor[0]][neighbor[1]] >= AStar.ROS_COST_POSSIBLY_CIRCUMSCRIBED:
+                        if map_2d[neighbor[0]][neighbor[1]] >= self.ROS_COST_POSSIBLY_CIRCUMSCRIBED:
                             continue
                         # Consider but apply cost
-                        elif map_2d[neighbor[0]][neighbor[1]] >= AStar.ROS_COST_POSSIBLY_NONFREE:
+                        elif map_2d[neighbor[0]][neighbor[1]] >= self.ROS_COST_POSSIBLY_NONFREE:
                             extra_cost_ratio = (1.0 + float(map_2d[neighbor[0]][neighbor[1]]) /
-                                                float(AStar.ROS_COST_POSSIBLY_CIRCUMSCRIBED - 1))
-                            cost_between_current_and_neighbor = AStar.dist_between(current, neighbor) * extra_cost_ratio
+                                                float(self.ROS_COST_POSSIBLY_CIRCUMSCRIBED - 1))
+                            cost_between_current_and_neighbor = self._dist_between(current, neighbor) * extra_cost_ratio
                         # Consider without cost
                         else:
-                            cost_between_current_and_neighbor = AStar.dist_between(current, neighbor)
+                            cost_between_current_and_neighbor = self._dist_between(current, neighbor)
                     else:
                         # Neighbor is outside of map in y axis
                         continue
@@ -155,15 +187,7 @@ class AStar:
                     came_from[neighbor] = current
                     came_from_direction[neighbor] = new_direction
                     gscore[neighbor] = tentative_g_score
-                    fscore[neighbor] = tentative_g_score + AStar.heuristic_cost_estimate(neighbor, goal)
+                    fscore[neighbor] = tentative_g_score + self._heuristic_cost_estimate(neighbor, goal)
                     heappush(open_heap, (fscore[neighbor], neighbor))
     
         return []
-    
-    
-    @staticmethod
-    def print_path(nmap, path):
-        matrix = copy.deepcopy(nmap)
-        for point in path:
-            matrix[point[0]][point[1]] = -1
-        print(matrix)
