@@ -15,7 +15,7 @@ class MultilayeredMap:
     LETHAL_COST_ROS = 254
     FREESPACE_COST_ROS = 0
     NEWPOINT_VALUE = -1
-    
+
     DBSCAN_EPSILON = 10
     DBSCAN_MIN_SAMPLES = 1
     DBSCAN_ALGORITHM = 'auto'
@@ -24,11 +24,11 @@ class MultilayeredMap:
     DBSCAN_LEAF_SIZE = 30
     DBSCAN_P = None
     N_JOBS = 1
-    
+
     PSEUDO_INFLATION_FOOTPRINT = [[1, 1, 1],
                                   [1, 1, 1],
                                   [1, 1, 1]]
-    
+
     def __init__(self, rosMap, robotDiameter):
         self.origin = rosMap.info.origin
         self.resolution = rosMap.info.resolution
@@ -53,7 +53,7 @@ class MultilayeredMap:
     def update_laserscan(self, pointsWithDistance, robot_pose, obstacle_range, raytrace_range):
         updated_obstacle_occ_grid = copy.deepcopy(self.obstacle_occ_grid)
         updated_obstacles = copy.deepcopy(self.obstacles)
-        
+
         ### Clearing ###
         ## Raytracing method ##
         # Use bresenham algorithm to trace lines in 2D:
@@ -69,7 +69,7 @@ class MultilayeredMap:
                               point.coords[1])) # y2
                 for point in line_points:
                     pointsToClear.add(point)
-        
+
         # pointsToClear is a set of tuples set([(x,y), ...])
         new_cleared_points = []
         for point in pointsToClear:
@@ -82,12 +82,12 @@ class MultilayeredMap:
                 self.updated_obstacle_occ_grid[point[0]][point[1]] = MultilayeredMap.FREESPACE_COST_ROS
                 updated_obstacles[current_obstacle_id].removePoin # FIXME FINISH THIS LINE
                 new_cleared_points.append(SimplePosition(point[0], point[1]))
-            
+
         ## "Conetracing" method ##
         # Draw polygons of successive clearable points of the laser_points list
         # And remove all registered points within them
         # TODO Implement this idea if appropriate
-        
+
         ### Marking and Static Map Overlap Checking ###
         # Add points only if within marking distance, and that they are not in
         # a pseudo inflated static occupation spot
@@ -98,8 +98,8 @@ class MultilayeredMap:
             isNotInPseudo = (self.pseudo_inflated_static_occ_grid[point.coords[0]][point.coords[1]] == 0)
             if (isInRange and isInMatrix and isNotInPseudo):
                 self.updated_obstacle_occ_grid = MultilayeredMap.LETHAL_COST_ROS
-                
-        
+
+
         # Clusterize points into separate obstacles
         db = DBSCAN(eps=MultilayeredMap.DBSCAN_EPSILON,
             min_samples=MultilayeredMap.DBSCAN_MIN_SAMPLES,
@@ -122,14 +122,15 @@ class MultilayeredMap:
         for i in range(len(cluster_labels)):
             clusters[cluster_labels[i]].append(npObstaclePoints[i])
 
-    def freeSpaceCreated(self):
-        # FIXME return true if we moved an object
-        # (or if an object moved by itself)
+    def has_free_space_been_created(self):
+        # FIXME return true if we moved an object (or if an object moved by
+        # itself). Will require keeping track of calls to function. For
+        # simulation, the simulator can directly provide data about whether an
+        # obstacle has been moved or not, but for a real application, we will
+        # need to evaluate if any of the points in the map integer coordinate
+        # system have been moved for each obstacle.
         return True
 
-    def newMovableObstacles(self):
-        return {}  # FIXME the list of new movable obstacles
-    
     # def pushUsingGraspPointPossible(self, obstacle, graspPoint):
     # # FIXME first simulate a discrete push in d. Don't forget to update both obstacle.x and y !
     # # FIXME Check if graspPoint enters in collision with surrounding known space in the map.
@@ -143,15 +144,15 @@ class MultilayeredMap:
         return positions
 
     def _get_pseudo_inflated_static_occ_grid(self):
-        return _get_inflastamped_matrix(self.static_obstacles_positions, 
+        return _get_inflastamped_matrix(self.static_obstacles_positions,
                                         MultilayeredMap.PSEUDO_INFLATION_FOOTPRINT,
                                         self.width,
                                         self.height)
-                                        
+
     def _get_inflated_obstacle_grid(self, obstacle, footprint, removeObstaclePoints = False):
         inflation_width = len(footprint)
         inflation_heigth = len(footprint[0])
-        
+
         matrixTopLeftX = ((obstacle.bbTopLeft.coords[0] - inflation_width)
             if (obstacle.bbTopLeft.coords[0] - inflation_width) < 0 else 0)
         matrixTopLeftY = ((obstacle.bbTopLeft.coords[1] - inflation_heigth)
@@ -163,7 +164,7 @@ class MultilayeredMap:
 
         width = matrixBottomRightX - matrixTopLeftX
         height = matrixBottomRightY - matrixTopLeftY
-            
+
         return _get_inflastamped_matrix(obstacle.points,
                                         footprint,
                                         width,
@@ -171,7 +172,7 @@ class MultilayeredMap:
                                         matrixTopLeftX,
                                         matrixTopLeftY,
                                         removeObstaclePoints)
-                                        
+
     # Works best if footprint has odd width and height
     # Basically, you just stamp the inflation footprint on each obstacle point
     @staticmethod
@@ -179,19 +180,19 @@ class MultilayeredMap:
         # TODO a funny way to implement even sized footprints would be to
         # add a column and/or line in the middle by copying one of the
         # columns/lines of the middle of the footprint
-        
+
         matrix = numpy.zeros((width, height))
-        
+
         fWidthLeft = len(footprint) / 2 if len(footprint) % 2 == 0 else (len(footprint) - 1) / 2
         fHeightLeft = len(footprint[0]) / 2 if len(footprint[0]) % 2 == 0 else (len(footprint[0]) - 1) / 2
         fWidthRight = len(footprint) / 2
         fHeightRight = len(footprint[0]) / 2
-        
+
         # Inflate the obstacle <=> apply footprint at every obstacle point
         for obsPoint in obstacle_points:
             xInM = obsPoint[0] - offsetX
             yInM = obsPoint[1] - offsetY
-            
+
             # Apply the footprint around the point
             xF, yF = 0, 0 # Current coordinates in footprint
             for xM in range(xInM - fWidthLeft, xInM + fWidthRight):
@@ -200,7 +201,7 @@ class MultilayeredMap:
                         M[xM][yM] = footprint[xF][yF]
                     yF = yF + 1
                 xF = xF + 1
-                
+
         # Remove points that correspond to the obstacle itself if asked for it
         # Do not combine with above loop : there would be overwriting
         if removeObstaclePoints:
@@ -210,7 +211,7 @@ class MultilayeredMap:
                 matrix[xInM][yInM] = 0
 
         return matrix
-    
+
     # Helper function
     @staticmethod
     def _is_in_matrix(x, y, width, height) :

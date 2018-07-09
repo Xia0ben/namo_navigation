@@ -17,44 +17,46 @@ from multilayered_map import MultilayeredMap
 from plan import Plan
 
 class NavManager:
-    
-    def __init__():
+
+    def __init__(self):
         # Get parameters
         self.static_map_topic = "/map" # rospy.get_param('~map_topic')
-        self.robot_diameter = "0.5" # rospy.get_param('~robot_diameter')
+        self.robot_diameter = "0.5" # [m] rospy.get_param('~robot_diameter')
         self.map_frame = "/map" # rospy.get_param('~map_frame')
         self.robot_frame = "base_footprint" # rospy.get_param('~robot_frame')
         self.move_cost = 1.0 # rospy.get_param('~move_cost')
         self.push_cost = 1.0 # rospy.get_param('~push_cost')
-        
+        self.xy_goal_tolerance = 0.10 # [m] rospy.get_param('~xy_goal_tolerance')
+        self.yaw_goal_tolerance = 0.03 # [rad] rospy.get_param('~yaw_goal_tolerance')
+
         # Subscribe to necessary topics
         self.tf_listener = tf.TransformListener()
         rospy.Subscriber(self.static_map_topic, OccupancyGrid, self.static_map_callback)
-        
+
         # Declare common parameters
         self.static_map = None
         self.navigation_map = None
-        self.global_planner = GlobalPlanner
-        
+        self.global_planner = GlobalPlanner()
+
         # Initialize map
         while self.static_map is None:
             rospy.sleep(0.2)
         self.navigation_map = MultilayeredMap(self.static_map, self.robot_diameter)
 
-        
+
     def _static_map_callback(self, new_map):
         # For the moment, we don't want to manage new static maps for the
         # node's life duration
         if self.static_map is None:
             self.static_map = new_map
-            
-    def _get_current_pose():
+
+    def _get_current_pose(self):
         time  = rospy.Time(0) # Makes sure same tf is used for calls
         robot_pose = PoseStamped()
-        
+
         try:
             (position, quaternion) = self.tf_listener.lookupTransform(self.map_frame, self.robot_frame, time)
-            
+
             robot_pose.header.seq = 1
             robot_pose.header.stamp = rospy.Time(0)
             robot_pose.header.frame_id = self.map_frame
@@ -65,226 +67,253 @@ class NavManager:
             robot_pose.pose.orientation.y = quaternion.y
             robot_pose.pose.orientation.z = quaternion.z
             robot_pose.pose.orientation.w = quaternion.w
-            
+
         except (tf.Exception, tf.LookupException, tf.ConnectivityException):
             rospy.loginfo("Couldn't get robot pose in map : transform unavailable. \
             Maybe amcl is not working and there is no transform between \
             /odom and /map ?")
-        
+
         return robot_pose
 
+    def _is_goal_app_reached(self, current_pose, goal_pose):
+        distance_to_goal = Utils.distance_between_ros_poses(current_pose, goal_pose)
 
-    def makeAndExecutePlan(goalRobotPoseParam):
-        initRobotPose = self._get_current_pose()
-    
-        self._optimized(initRobotPose, goalRobotPose)
-    
-    def _optimized(initRobotPose, goalRobotPose):
-    
+        if distance_to_goal < self.xy_goal_tolerance:
+            return True
+        return False
+
+        # TODO May be necessary to check if goal orientation has been reached too
+        # Use yaw_goal_tolerance param for that
+
+    def make_and_execute_plan(self, goal_robot_poseParam):
+        init_robot_pose = self._get_current_pose()
+
+        self._optimized(init_robot_pose, goal_robot_pose)
+
+    def _get_cost_at_index(self, sorted_dict, index):
+        try:
+            return sorted_dict.peekitem(index)[1]
+        except IndexError:
+            # If cost not found at index in dict, it means
+            return float('inf')
+
+    def _get_obstacle_at_index(self, sorted_dict, index):
+        try:
+            return sorted_dict.peekitem(index)[0]
+        except IndexError as e:
+            raise e
+
+    def _optimized(init_robot_pose, goal_robot_pose):
         # Current state
-        currentRobotPose = initRobotPose
-        newObstacles = set()
-        euclideanCostL = SortedDict()
-        minCostL = SortedDict()
-        optimalPath = GlobalPlanner.make_plan(self.navigation_map.get_merged_occupancy_grid(), initRobotPose, goalRobotPose)
-    
-        # While 1
-        while (currentRobotPose != goalRobotPose):  # FIXME to be reformulated
-            map.update()
-            if {map.freeSpaceCreated()}
-                minCostL.clear()
-    
-            newObstacles = newObstacles.union(map.newMovableObstacles())
-    
-            for currentObstacle in map.obstacles:
-                euclideanCostL[currentObstacle] = numpy.linalg.norm(
-                    goalRobotPose.pos - currentObstacle.initPose.pos) # FIXME ADD CONVERSION FROM TUPLE TO ARRAY
-    
-            if (optimalPath.intersectsWithObstacles(newObstacles)):
-                optimalPath = GlobalPlanner.make_plan(
-                    self.navigation_map.get_merged_occupancy_grid(), currentRobotPose, goalRobotPose)
-    
-                indexEL, indexML = 0, 0
-    
-                # minCostL.peekitem(indexML)[0] -> returns the obstacle
-                # minCostL.peekitem(indexML)[1] -> returns the estimated cost
-                # While 2
-                # FIXME check for IndexError because if list is empty, everything will explode
-                while (min(minCostL.peekitem(indexML)[1], euclideanCostL.peekitem(indexEL)[1]) < optimalPath.cost):
-                    if (minCostL.peekitem(indexML).[1] < euclideanCostL.peekitem(indexEL)[1]):
-                        currentPath = optEvaluateAction(minCostL.peekitem(indexML).[0], optimalPath, map, currentRobotPose, goalRobotPose)
-    
-                        if (currentPath is not None):
-                            minCostL[minCostL.peekitem(indexML).[0]] = currentPath.minCost
-                            indexML = indexML + 1
-    
-                            if (currentPath.cost < optimalPath.cost):
-                                optimalPath = currentPath
-    
+        current_robot_pose = init_robot_pose
+        euclidean_cost_L = SortedDict()
+        min_cost_L = SortedDict()
+        optimal_plan = Plan.from_path(
+            self.global_planner.make_plan(self.navigation_map.merged_occ_grid, init_robot_pose, goal_robot_pose),
+            is_manipulation = False, resolution = self.navigation_map.resolution,
+            move_cost = self.move_cost, push_cost = self.push_cost)
+
+        # While check goal is reached
+        while not _is_goal_app_reached(current_robot_pose, goal_robot_pose):
+            # Original algorithm only checks for intersection with new obstacles
+            # But actually, if we use an occupancy grid to check whether the
+            # path crosses any obstacle, it doesn't change any functionnality
+            # and is not any more costly. Actually, it is less of a pain to
+            # implement.
+            if (optimal_plan.intersects_with_obstacles(self.navigation_map.merged_occ_grid)):
+                if self.navigation_map.has_free_space_been_created():
+                    min_cost_L.clear()
+
+                for current_obstacle in self.navigation_map.obstacles:
+                    euclidean_cost_L[current_obstacle] = Utils.distance_between_ros_poses(goal_robot_pose, goal_pose, current_obstacle.pose))
+
+                optimal_plan = Plan.from_path(
+                    self.global_planner.make_plan(self.navigation_map.merged_occ_grid, current_robot_pose, goal_robot_pose),
+                    is_manipulation = False, resolution = self.navigation_map.resolution,
+                    move_cost = self.move_cost, push_cost = self.push_cost)
+
+                index_EL, index_ML = 0, 0
+
+                # Note: min_cost_L.peekitem(index_ML)[0] -> returns the obstacle
+                # Note: min_cost_L.peekitem(index_ML)[1] -> returns the estimated cost
+                # While we need to evaluate obstacles
+                while (min(self._get_cost_at_index(min_cost_L, index_ML), self._get_cost_at_index(euclidean_cost_L, index_EL)) < optimal_plan.cost):
+                    if (self._get_cost_at_index(min_cost_L, index_ML) < self._get_cost_at_index(euclidean_cost_L, index_EL)):
+                        current_plan = _opt_evaluate_action(self._get_obstacle_at_index(min_cost_L, index_ML), optimal_plan, map, current_robot_pose, goal_robot_pose)
+
+                        if (current_plan is not None):
+                            min_cost_L[self._get_obstacle_at_index(min_cost_L, index_ML)] = current_plan.min_cost
+                            index_ML = index_ML + 1
+
+                            if (current_plan.cost < optimal_plan.cost):
+                                optimal_plan = current_plan
+
                     else
                         try:
-                            # If the minCostL doesn't contain the obstacle, do except
-                            minCostL.index(euclideanCostL.peekitem(indexEL)[0])
-                        except ValueError as exception:
-                            currentPath = optEvaluateAction(euclideanCostL.peekitem(
-                                indexEL)[0], optimalPath, map, currentRobotPose, goalRobotPose)
-    
-                            if (currentPath is not None):
-                                minCostL[euclideanCostL.peekitem(
-                                    indexEL)[0]] = currentPath.minCost
-                                indexML = indexML + 1
-    
-                                if (currentPath.cost < optimalPath.cost):
-                                    optimalPath = currentPath
-    
-                    indexEL = indexEL + 1
-                    # Endwhile 2
-    
-                newObstacles.clear()
-    
-            # R \gets$ Next step in $optimalPath$ FIXME Have the robot advance one step in the plan
-            # Endwhile 1
+                            # If the min_cost_L doesn't contain the obstacle, do except
+                            min_cost_L.index(self._get_obstacle_at_index(euclidean_cost_L, index_EL))
+                        except IndexError as exception:
+                            current_plan = _opt_evaluate_action(self._get_obstacle_at_index(euclidean_cost_L,
+                                index_EL), optimal_plan, map, current_robot_pose, goal_robot_pose)
+
+                            if (current_plan is not None):
+                                min_cost_L[self._get_obstacle_at_index(euclidean_cost_L,
+                                    index_EL)] = current_plan.min_cost
+                                index_ML = index_ML + 1
+
+                                if (current_plan.cost < optimal_plan.cost):
+                                    optimal_plan = current_plan
+
+                    index_EL = index_EL + 1
+                    # Endwhile we need to evaluate obstacles
+
+            # R \gets$ Next step in $optimal_plan$ FIXME Have the robot advance one step in the plan
+            # Endwhile check goal is reached
 
 
-    def optEvaluateAction(obstacle, optimalPath, map, currentRobotPose, goalRobotPose):
-        pathsSet = SortedDict()  # Use sortedDict rather than set or array for ease of use
-        blockingAreas = None
-    
+    def _opt_evaluate_action(obstacle, optimal_plan, map, current_robot_pose, goal_robot_pose):
+        paths_set = SortedDict()  # Use sortedDict rather than set or array for ease of use
+        blocking_areas = None
+
         # For easier implementation, we iterate over grasp points rather than
         # an abstract concept of "direction"
         for graspPoint in obstacle.graspPoints
             one_push_in_d = obstacle.initPose.pos - graspoint  # FIXME ADD CONVERSION FROM TUPLE TO ARRAY
             # FIXME put the right value here
-            firstRobotPose = copy.deepcopy(currentRobotPose)
-    
+            firstRobotPose = copy.deepcopy(current_robot_pose)
+
             # Computation of c1 is done here (a contrario to the original algorithm)
             # because it is in fact dependent of the grasp point (if the grasp point
             # cannot be reached, we imediately know it)
-            c1 = GlobalPlanner.make_plan(self.navigation_map.get_merged_occupancy_grid(),
-                currentRobotPose, firstRobotPose)
+            c1 = Plan.from_path(
+                self.global_planner.make_plan(self.navigation_map.merged_occ_grid, current_robot_pose, firstRobotPose),
+                is_manipulation = False, resolution = self.navigation_map.resolution,
+                move_cost = self.move_cost, push_cost = self.push_cost)
             # If no path to the grasping point is found, then study next point
             if (c1 is not None):
                 obstacle.simPose = obstacle.initPose
                 seq = 1
                 # FIXME so that the start position is not the center of the object but the grasping point
-                c3_est = Plan.from_poses(obstacle.simPose, goalRobotPose,
+                c3_est = Plan.from_poses(obstacle.simPose, goal_robot_pose,
                             self.navigation_map.resolution, isManipulation = False,
                             move_cost = self.move_cost, push_cost = self.push_cost)
                 cEst = c1.cost + c3_est.cost + seq * self.push_cost
-    
-                while (obstacle.pushUsingGraspPointPossible(graspPoint, map) and cEst <= optimalPath.cost):
-                    if (checkNewOpening(map, obstacle, [one_push_in_d], blockingAreas)):
+
+                while (obstacle.pushUsingGraspPointPossible(graspPoint, map) and cEst <= optimal_plan.cost):
+                    if (_check_new_opening(map, obstacle, [one_push_in_d], blocking_areas)):
                         obstacle.simPose.pos = obstacle.simPose.pos + one_push_in_d
                         # FIXME both points
                         c2 = Plan.from_poses(obstacle.initPose, obstacle.simPose,
                             self.navigation_map.resolution, isManipulation = False,
                             move_cost = self.move_cost, push_cost = self.push_cost)
-                        c3 = Plan.from_path(GlobalPlanner.make_plan(self.navigation_map.get_merged_occupancy_grid(), obstacle.simPose, goalRobotPose))  # FIXME origin point
+                        c3 = Plan.from_path(self.global_planner.make_plan(self.navigation_map.merged_occ_grid, obstacle.simPose, goal_robot_pose),
+                            is_manipulation = False, resolution = self.navigation_map.resolution,
+                            move_cost = self.move_cost, push_cost = self.push_cost)  # FIXME origin point
                         # Costs are computed within the class
-                        currentPath = Plan.from_plans(c1, c2, c3)
+                        current_plan = Plan.from_plans(c1, c2, c3)
                 seq = seq + 1
-    
+
                 # FIXME so that the start position is not the center of the object but the grasping point
-                c3_est = Plan.from_poses(obstacle.simPose, goalRobotPose,
+                c3_est = Plan.from_poses(obstacle.simPose, goal_robot_pose,
                             self.navigation_map.resolution, isManipulation = True,
                             move_cost = self.move_cost, push_cost = self.push_cost)
-    
+
                 cEst = c1.cost + c3_est.cost + seq * self.push_cost
-    
+
         # Return path with lowest cost : the first in the ordered dictionnary
         # If there is none, return None
         try:
-            return peekitem(0)
-        except IndexError as noPathFound:
+            return paths_set.peekitem(0)
+        except IndexError:
             return None
-    
+
     # It may be interesting to move the following methods into a proper class
-    
-    
-    def checkNewOpening(map, obstacle, action, blockingAreas):
+
+
+    def _check_new_opening(map, obstacle, action, blocking_areas):
         M = getObstacleMatrix(map, obstacle)
         xOffset = obstacle.simPose.pos[0]
         yOffset = obstacle.simPose.pos[1]
-    
-        if (blockingAreas is None):
-            blockingAreas = getBlockingAreas(
+
+        if (blocking_areas is None):
+            blocking_areas = get_blocking_areas(
                 xOffset, yOffset, M, map.mergedBinaryOccupationGrid)
-    
-        newPos = getNewPos(action, obstacle)
+
+        newPos = get_new_pos(action, obstacle)
         xOffset, yOffset = newPos[0], newPos[1]
-        blockingAreasAfterAction = getBlockingAreas(
+        blocking_areasAfterAction = get_blocking_areas(
             xOffset, yOffset, M, map.mergedBinaryOccupationGrid)
         shiftedBlockingAreas = [
             [0 for k in range(len(M))] for l in range(len(M[k]))]
-    
+
         for i in range(len(shiftedBlockingAreas)):
             for j in range(len(shiftedBlockingAreas[i])):
                 x = (xOffset - obstacle.simPose.pos[0]) + i
                 y = (yOffset - obstacle.simPose.pos[1]) + j
-    
+
                 if (0 < x < len(shiftedBlockingAreas) and 0 < y < len(shiftedBlockingAreas[x])):
-                    shiftedBlockingAreas[x][y] = blockingAreasAfterAction[i][j]
-    
-        Z = compare(blockingAreas, shiftedBlockingAreas)
-        if isZeroMatrix(Z)
+                    shiftedBlockingAreas[x][y] = blocking_areasAfterAction[i][j]
+
+        Z = compare(blocking_areas, shiftedBlockingAreas)
+        if is_zero_matrix(Z)
             return False
         return True
-    
-    
-    def getBlockingAreas(xOffset, yOffset, M, grid):
+
+
+    def get_blocking_areas(xOffset, yOffset, M, grid):
         index = 1
-        blockingAreas = [[0 for k in range(len(M))] for l in range(len(M[k]))]
-    
-        for i in range(len(blockingAreas)):
-            for j in range(len(blockingAreas[i])):
+        blocking_areas = [[0 for k in range(len(M))] for l in range(len(M[k]))]
+
+        for i in range(len(blocking_areas)):
+            for j in range(len(blocking_areas[i])):
                 if (M[x][y] != 0 and grid[x + xOffset][y + yOffset] != 0):
-                    assignNr(blockingAreas, x, y, index)
-    
-        return blockingAreas
-    
-    
-    def assignNr(blockingAreas, x, y, index):
+                    assign_nr(blocking_areas, x, y, index)
+
+        return blocking_areas
+
+
+    def assign_nr(blocking_areas, x, y, index):
         # Note : range(-1, 2) = [-1, 0, 1]
         for i in range(-1, 2):
             for j in range(-1, 2):
-                if (blockingAreas[x + i][y + j] != 0):
-                    blockingAreas[x][y] = blockingAreas[x + i][x + j]
+                if (blocking_areas[x + i][y + j] != 0):
+                    blocking_areas[x][y] = blocking_areas[x + i][x + j]
                     return
-        blockingAreas[x][y] = index
+        blocking_areas[x][y] = index
         index = index + 1
         return
-    
-    
-    def compare(blockingAreasBefore, blockingAreasAfter):
-        comparisonMatrix = copy.deepcopy(blockingAreasAfter)
+
+
+    def compare(blocking_areasBefore, blocking_areasAfter):
+        comparisonMatrix = copy.deepcopy(blocking_areasAfter)
         delNum = set()
-    
+
         for x in range(len(comparisonMatrix)):
             for y in range(len(comparisonMatrix[x])):
-    
-                if (blockingAreasBefore[x][y] in delNum):
+
+                if (blocking_areasBefore[x][y] in delNum):
                     comparisonMatrix[x][y] = 0
-                if (blockingAreasBefore[x][y] != 0 and
-                        blockingAreasAfter[x][y] != 0):
+                if (blocking_areasBefore[x][y] != 0 and
+                        blocking_areasAfter[x][y] != 0):
                     delNum = delNum.union(comparisonMatrix[x][y])
                     comparisonMatrix[x][y] = 0
-    
+
         return comparisonMatrix
-    
+
     # Helper functions for the Efficient Local Opening Detection Algorithm (ELODA)
-    
+
     # action is an array of 2D vectors (2 items-arrays)
-    def getNewPos(action, obstacle):
+    def get_new_pos(action, obstacle):
         action = [[20.0, 30.0]]
         newPos = [obstacle.simPose.pos[0], obstacle.simPose.pos[1]]
-    
+
         for component in action:
             newPos = [newPos[0] + component[0], newPos[1] + component[1]]
-    
+
         return newPos
-    
-    
-    def isZeroMatrix(Z):
+
+
+    def is_zero_matrix(Z):
         for i in range(len(Z)):
             for j in range(len(Z[i])):
                 if Z[i][j] != 0
