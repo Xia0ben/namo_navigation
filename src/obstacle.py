@@ -13,7 +13,7 @@ class Obstacle:
 
         self.isMovable = True
 
-        self.initPose = SimplePose.from_position(position)
+        self.pose = SimplePose.from_position(position)
         self.simPose = copy.deepcopy(self.initPose)
         self.points = points
         # FIXME Compute grasp Points. ONLY FOR OBJECTS THAT ARE CIRCLES ?

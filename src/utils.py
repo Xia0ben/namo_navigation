@@ -1,8 +1,49 @@
 import rospy
+import tf
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Path
 
 class Utils:
+    TF_LISTENER = tf.TransformListener()
+    
+    @staticmethod
+    def get_current_pose(map_frame, robot_frame):
+        
+        time  = rospy.Time(0) # Makes sure same tf is used for calls
+        robot_pose = PoseStamped()
+    
+        while True:
+            try:
+                (position, quaternion) = Utils.TF_LISTENER.lookupTransform(map_frame, robot_frame, time)
+    
+                robot_pose.header.seq = 1
+                robot_pose.header.stamp = rospy.Time(0)
+                robot_pose.header.frame_id = map_frame
+                robot_pose.pose.position.x = position[0]
+                robot_pose.pose.position.y = position[1]
+                robot_pose.pose.position.z = position[2]
+                robot_pose.pose.orientation.x = quaternion[0]
+                robot_pose.pose.orientation.y = quaternion[1]
+                robot_pose.pose.orientation.z = quaternion[2]
+                robot_pose.pose.orientation.w = quaternion[3]
+                
+                break
+    
+            except (tf.Exception, tf.LookupException, tf.ConnectivityException):
+                rospy.loginfo("Couldn't get robot pose in map : transform unavailable. \
+                Maybe amcl is not working and there is no transform between \
+                /odom and /map ?")
+
+        return robot_pose
+    
+    @staticmethod
+    def yaw_from_geom_quat(geom_quat):
+        explicit_quat = [geom_quat.x,
+                         geom_quat.y,
+                         geom_quat.z,
+                         geom_quat.w]
+        return tf.transformations.euler_from_quaternion(explicit_quat)[2]
+    
     @staticmethod
     def ros_path_from_map_path(map_path, start_pose, end_pose, resolution, frame_id):
         ros_path = Path()

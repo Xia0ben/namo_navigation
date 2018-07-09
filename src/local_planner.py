@@ -4,15 +4,14 @@ import rospy
 import tf
 import math
 import numpy as np
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist, PointStamped
+from geometry_msgs.msg import Twist, PointStamped, PoseStamped
+from utils import Utils
 
 import actionlib
 
-from local_planner.msg import FollowPathAction, FollowPathActionFeedback, FollowPathActionGoal, FollowPathActionResult, FollowPathFeedback, FollowPathGoal, FollowPathResult
+from namo_navigation.msg import FollowPathAction, FollowPathActionFeedback, FollowPathActionGoal, FollowPathActionResult, FollowPathFeedback, FollowPathGoal, FollowPathResult
 
 class LocalPlanner(object):
-    ODOM_TOPIC = '/odom'
     VEL_TOPIC = '/cmd_vel'
     MAX_LINEAR_SPEED = 0.3
     MAX_ANGULAR_SPEED = 0.5
@@ -22,10 +21,8 @@ class LocalPlanner(object):
     DISTANCE_TOLERANCE = 0.05 # [m]
 
     def __init__(self):
-
-        # Init odom topic sub
-        self._sub = rospy.Subscriber(LocalPlanner.ODOM_TOPIC, Odometry, self.odom_callback)
-        self._odomdata = Odometry()
+        self.map_frame = "/map" # rospy.get_param('~map_frame')
+        self.robot_frame = "/base_link" # rospy.get_param('~robot_frame')
 
         self.tf_listener = tf.TransformListener()
 
@@ -34,16 +31,13 @@ class LocalPlanner(object):
         self._twist_object = Twist()
 
         # Creates the action server
-        _follow_path_as = actionlib.SimpleActionServer("follow_path_as", FollowPathAction, goal_callback, False)
-        _follow_path_as.start()
+        self._follow_path_as = actionlib.SimpleActionServer("follow_path_as", FollowPathAction, self.goal_callback, False)
+        self._follow_path_as.start()
 
         rospy.loginfo("Local planner inited")
 
-    def goal_callback(self, path):
-        self.follow_path(path)
-
-    def odom_callback(self, msg):
-        self._odomdata = msg
+    def goal_callback(self, goal):
+        self.follow_path(goal.path)
 
     def move_robot(self, direction):
         if direction == "forward":
@@ -77,16 +71,6 @@ class LocalPlanner(object):
                 self._cmd_vel_pub.publish(self._twist_object)
                 break
 
-    def get_odom(self):
-        return self._odomdata
-
-    @staticmethod
-    def yaw_from_geom_quat(geom_quat):
-        explicit_quat = [geom_quat.x,
-                         geom_quat.y,
-                         geom_quat.z,
-                         geom_quat.w]
-        return tf.transformations.euler_from_quaternion(explicit_quat)[2]
 
     # TODO Merge turn_in_place and move_linearly as move_to_target and use a
     # boolean to switch between the two behaviours
@@ -97,8 +81,8 @@ class LocalPlanner(object):
 
         # Wait for target angle to be attained then break
         while True:
-            current_robot_odometry = self._odomdata
-            current_yaw = LocalPlanner.yaw_from_geom_quat(current_robot_odometry.pose.pose.orientation)
+            current_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
+            current_yaw = Utils.yaw_from_geom_quat(current_pose.pose.orientation)
 
             if self._follow_path_as.is_preempt_requested():
               rospy.loginfo('The goal has been cancelled/preempted')
@@ -112,22 +96,19 @@ class LocalPlanner(object):
 
         # Stop turning
         self.move_robot("stop")
-        #rospy.loginfo("Stop, odometry is at : %s", current_robot_odometry)
 
         return True # TODO check if rotation actually succeeds, and if not, return False
 
-    def move_linearly(self, target_position, distance_tolerance, move_direction):
+    def move_linearly(self, distance, init_pose, distance_tolerance, move_direction):
         # Start moving
         #rospy.loginfo("Start moving to target point : %s", target_position)
         self.move_robot(move_direction)
 
         # Wait for target position to be attained then break
         while True:
-            current_robot_odometry = self._odomdata
-            current_direction = target_position - np.array(
-                [current_robot_odometry.pose.pose.position.x,
-                 current_robot_odometry.pose.pose.position.y])
-            current_direction_norm = np.linalg.norm(current_direction)
+            current_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
+            traveled_distance = np.linalg.norm(np.array([current_pose.pose.position.x, current_pose.pose.position.y]) -
+                np.array([init_pose.pose.position.x, init_pose.pose.position.y]))
 
             if self._follow_path_as.is_preempt_requested():
               rospy.loginfo('The goal has been cancelled/preempted')
@@ -136,7 +117,7 @@ class LocalPlanner(object):
               break
 
             # If current position is close to target position
-            if np.isclose(0.0, current_direction_norm, atol = distance_tolerance):
+            if np.isclose(traveled_distance, distance, atol = distance_tolerance):
                 break
 
         # Stop turning
@@ -145,29 +126,21 @@ class LocalPlanner(object):
 
         return True # TODO check if move actually succeeds, and if not, return False
 
-    def robot_local_point(self, point, robot_pos, theta):
-        point_translated = (point[0] - robot_pos[0], point[1] - robot_pos[1])
-        point_translated_rotated = (point_translated[0] * math.cos(theta) - point_translated[1] * math.sin(theta),
-                                    point_translated[0] * math.sin(theta) + point_translated[1] * math.cos(theta))
-
-        pointstamp = PointStamped()
-        pointstamp.header.frame_id = "odom"
-        pointstamp.header.stamp = rospy.Time(0)
-        pointstamp.point.x = point[0]
-        pointstamp.point.y = point[1]
-        pointstamp.point.z = 0.0
+    def robot_local_point(self, pose_stamped):
+        # TODO transform locally : may require adjustments
+        # point_translated = (point[0] - robot_pos[0], point[1] - robot_pos[1])
+        # point_translated_rotated = (point_translated[0] * math.cos(theta) - point_translated[1] * math.sin(theta),
+        #                             point_translated[0] * math.sin(theta) + point_translated[1] * math.cos(theta))
 
         while True:
             try:
-                tf_pointstamp = self.tf_listener.transformPoint("base_link", pointstamp)
-                tf_point_translated_rotated = (tf_pointstamp.point.x, tf_pointstamp.point.y)
-                rospy.loginfo("Tf local waypoint : %s", tf_point_translated_rotated)
+                local_pose = self.tf_listener.transformPose(self.robot_frame, pose_stamped)
                 break
             except (tf.LookupException, tf.ConnectivityException,
                     tf.ExtrapolationException):
                 pass
 
-        return tf_point_translated_rotated
+        return local_pose
 
     def modulo_pi(self, angle):
         if 0.0 <= angle <= math.pi or -math.pi <= angle <= 0.0:
@@ -185,28 +158,27 @@ class LocalPlanner(object):
         feedback = FollowPathFeedback()
 
         rospy.loginfo("Start of path following...")
-        for waypoint in path:
-            rospy.loginfo("Going to waypoint : %s", waypoint)
-            feedback.current_subgoal = waypoint
-            self._as.publish_feedback(feedback)
+        for current_subgoal in path.poses:
+            rospy.loginfo("Going to current_subgoal : %s", current_subgoal)
+            feedback.current_subgoal = current_subgoal
+            self._follow_path_as.publish_feedback(feedback)
 
-            current_robot_odometry = self._odomdata
-            current_position = (current_robot_odometry.pose.pose.position.x, current_robot_odometry.pose.pose.position.y)
-            current_yaw = LocalPlanner.yaw_from_geom_quat(current_robot_odometry.pose.pose.orientation)
+            current_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
+            current_yaw = Utils.yaw_from_geom_quat(current_pose.pose.orientation)
 
-            waypoint_local = self.robot_local_point(waypoint, current_position, current_yaw)
-            rospy.loginfo("Local waypoint : %s", waypoint_local)
+            current_subgoal_local = self.robot_local_point(current_subgoal)
+            rospy.loginfo("Local current_subgoal : %s", current_subgoal_local)
 
-            # If the waypoint is on the left side of the robot, go left, else the reverse
-            if waypoint_local[1] > 0:
+            # If the current_subgoal is on the left side of the robot, go left, else the reverse
+            if current_subgoal_local.pose.position.y > 0:
                 turn_direction = "left"
             else:
                 turn_direction = "right"
 
-            local_target_direction = np.array(waypoint_local)
+            local_target_direction = np.array([current_subgoal_local.pose.position.x, current_subgoal_local.pose.position.y])
             local_target_direction_norm = np.linalg.norm(local_target_direction)
 
-            if waypoint_local[0] < 0:
+            if current_subgoal_local.pose.position.x < 0:
                 rospy.loginfo("Complement acos because we are outside of range 0 to 180 deg.")
                 target_local_yaw = math.pi - math.acos(np.dot(local_target_direction, LocalPlanner.UNIT_VECTOR) /
                     local_target_direction_norm)
@@ -216,18 +188,45 @@ class LocalPlanner(object):
                     local_target_direction_norm)
 
             target_yaw = self.modulo_pi(current_yaw + target_local_yaw)
+            target_distance = local_target_direction_norm
             rospy.loginfo("Target local yaw : %s [rad], %s [deg]", target_local_yaw, math.degrees(target_local_yaw))
             rospy.loginfo("Target yaw : %s [rad], %s [deg]", target_yaw, math.degrees(target_yaw))
 
             # Turn then proceed forward
             self.turn_in_place(target_yaw, LocalPlanner.ANGLE_TOLERANCE, turn_direction)
-            self.move_linearly(np.array(waypoint), LocalPlanner.DISTANCE_TOLERANCE, "forward")
+            self.move_linearly(target_distance, current_pose, LocalPlanner.DISTANCE_TOLERANCE, "forward")
         rospy.loginfo("End of path following...")
         self._follow_path_as.set_succeeded()
 
 if __name__ == "__main__":
     rospy.init_node('local_planner', log_level=rospy.INFO)
     local_planner = LocalPlanner()
-    rospy.spin()
-
+    
+    # Test code :
     # PATH = [(1, 0), (1, 1), (0, 1), (0, 0)] # Test variable for debugging
+    pub = rospy.Publisher('/follow_path_as/goal', FollowPathActionGoal, queue_size=1)
+    test_goal = FollowPathActionGoal()
+    
+    pose_1 = PoseStamped()
+    pose_1.pose.position.x = 1.0
+    pose_1.pose.position.y = 0.0
+    pose_2 = PoseStamped()
+    pose_2.pose.position.x = 1.0
+    pose_2.pose.position.y = 1.0
+    pose_3 = PoseStamped()
+    pose_3.pose.position.x = 0.0
+    pose_3.pose.position.y = 1.0
+    pose_4 = PoseStamped()
+    pose_4.pose.position.x = 0.0
+    pose_4.pose.position.y = 0.0
+    
+    test_goal.goal.path.poses = [pose_1, pose_2, pose_3, pose_4]
+    
+    
+    while True:
+        connections = pub.get_num_connections()
+        if connections > 0:
+            pub.publish(test_goal)
+            break
+    
+    rospy.spin()

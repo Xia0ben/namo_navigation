@@ -24,7 +24,7 @@ class NavManager:
         self.static_map_topic = "/map" # rospy.get_param('~map_topic')
         self.robot_diameter = "0.5" # [m] rospy.get_param('~robot_diameter')
         self.map_frame = "/map" # rospy.get_param('~map_frame')
-        self.robot_frame = "base_footprint" # rospy.get_param('~robot_frame')
+        self.robot_frame = "/base_link" # rospy.get_param('~robot_frame')
         self.move_cost = 1.0 # rospy.get_param('~move_cost')
         self.push_cost = 1.0 # rospy.get_param('~push_cost')
         self.xy_goal_tolerance = 0.10 # [m] rospy.get_param('~xy_goal_tolerance')
@@ -52,31 +52,6 @@ class NavManager:
         if self.static_map is None:
             self.static_map = new_map
 
-    def _get_current_pose(self):
-        time  = rospy.Time(0) # Makes sure same tf is used for calls
-        robot_pose = PoseStamped()
-
-        try:
-            (position, quaternion) = self.tf_listener.lookupTransform(self.map_frame, self.robot_frame, time)
-
-            robot_pose.header.seq = 1
-            robot_pose.header.stamp = rospy.Time(0)
-            robot_pose.header.frame_id = self.map_frame
-            robot_pose.pose.position.x = position.x
-            robot_pose.pose.position.y = position.y
-            robot_pose.pose.position.z = position.z
-            robot_pose.pose.orientation.x = quaternion.x
-            robot_pose.pose.orientation.y = quaternion.y
-            robot_pose.pose.orientation.z = quaternion.z
-            robot_pose.pose.orientation.w = quaternion.w
-
-        except (tf.Exception, tf.LookupException, tf.ConnectivityException):
-            rospy.loginfo("Couldn't get robot pose in map : transform unavailable. \
-            Maybe amcl is not working and there is no transform between \
-            /odom and /map ?")
-
-        return robot_pose
-
     def _is_goal_app_reached(self, current_pose, goal_pose):
         distance_to_goal = Utils.distance_between_ros_poses(current_pose, goal_pose)
 
@@ -88,7 +63,7 @@ class NavManager:
         # Use yaw_goal_tolerance param for that
 
     def make_and_execute_plan(self, goal_robot_poseParam):
-        init_robot_pose = self._get_current_pose()
+        init_robot_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
 
         self._optimized(init_robot_pose, goal_robot_pose)
 
@@ -131,7 +106,8 @@ class NavManager:
                     min_cost_L.clear()
 
                 for current_obstacle in self.navigation_map.obstacles:
-                    euclidean_cost_L[current_obstacle] = Utils.distance_between_ros_poses(goal_robot_pose, goal_pose, current_obstacle.pose))
+                    euclidean_cost_L[current_obstacle] = Utils.distance_between_ros_poses(
+                        goal_robot_pose, goal_pose, current_obstacle.pose))
 
                 optimal_plan = Plan.from_path(
                     self.global_planner.make_plan(self.navigation_map.merged_occ_grid, current_robot_pose, goal_robot_pose),
@@ -177,7 +153,7 @@ class NavManager:
                 self._execute_plan(optimal_plan)
                 is_moving = True
 
-            current_robot_pose = _get_current_pose(self)
+            current_robot_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
             # R \gets$ Next step in $optimal_plan$ FIXME Have the robot advance one step in the plan
 
             # Endwhile check goal is reached
