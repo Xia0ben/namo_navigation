@@ -1,0 +1,7 @@
+#goal
+nav_msgs/Path path
+---
+#result
+---
+#feedback
+geometry_msgs/PoseStamped current_subgoal
