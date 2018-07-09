@@ -7,6 +7,10 @@ import numpy as np
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist, PointStamped
 
+import actionlib
+
+from local_planner.msg import FollowPathAction, FollowPathActionFeedback, FollowPathActionGoal, FollowPathActionResult, FollowPathFeedback, FollowPathGoal, FollowPathResult
+
 class LocalPlanner(object):
     ODOM_TOPIC = '/odom'
     VEL_TOPIC = '/cmd_vel'
@@ -29,7 +33,14 @@ class LocalPlanner(object):
         self._cmd_vel_pub = rospy.Publisher(LocalPlanner.VEL_TOPIC, Twist, queue_size=1)
         self._twist_object = Twist()
 
+        # Creates the action server
+        _follow_path_as = actionlib.SimpleActionServer("follow_path_as", FollowPathAction, goal_callback, False)
+        _follow_path_as.start()
+
         rospy.loginfo("Local planner inited")
+
+    def goal_callback(self, path):
+        self.follow_path(path)
 
     def odom_callback(self, msg):
         self._odomdata = msg
@@ -77,6 +88,8 @@ class LocalPlanner(object):
                          geom_quat.w]
         return tf.transformations.euler_from_quaternion(explicit_quat)[2]
 
+    # TODO Merge turn_in_place and move_linearly as move_to_target and use a
+    # boolean to switch between the two behaviours
     def turn_in_place(self, target_yaw, angle_tolerance, turn_direction):
         # Start turning
         #rospy.loginfo("Start turning to target yaw : %s", target_yaw)
@@ -87,7 +100,13 @@ class LocalPlanner(object):
             current_robot_odometry = self._odomdata
             current_yaw = LocalPlanner.yaw_from_geom_quat(current_robot_odometry.pose.pose.orientation)
 
-            # Break condition
+            if self._follow_path_as.is_preempt_requested():
+              rospy.loginfo('The goal has been cancelled/preempted')
+              # the following line, sets the client in preempted state (goal cancelled)
+              self._follow_path_as.set_preempted()
+              break
+
+            # If current yaw is close to target yaw
             if np.isclose(target_yaw, current_yaw, atol = angle_tolerance):
                 break
 
@@ -110,7 +129,13 @@ class LocalPlanner(object):
                  current_robot_odometry.pose.pose.position.y])
             current_direction_norm = np.linalg.norm(current_direction)
 
-            # Break condition
+            if self._follow_path_as.is_preempt_requested():
+              rospy.loginfo('The goal has been cancelled/preempted')
+              # the following line, sets the client in preempted state (goal cancelled)
+              self._follow_path_as.set_preempted()
+              break
+
+            # If current position is close to target position
             if np.isclose(0.0, current_direction_norm, atol = distance_tolerance):
                 break
 
@@ -157,9 +182,14 @@ class LocalPlanner(object):
             return self.modulo_pi(angle + 2.0 * math.pi)
 
     def follow_path(self, path):
+        feedback = FollowPathFeedback()
+
         rospy.loginfo("Start of path following...")
         for waypoint in path:
             rospy.loginfo("Going to waypoint : %s", waypoint)
+            feedback.current_subgoal = waypoint
+            self._as.publish_feedback(feedback)
+
             current_robot_odometry = self._odomdata
             current_position = (current_robot_odometry.pose.pose.position.x, current_robot_odometry.pose.pose.position.y)
             current_yaw = LocalPlanner.yaw_from_geom_quat(current_robot_odometry.pose.pose.orientation)
@@ -193,12 +223,11 @@ class LocalPlanner(object):
             self.turn_in_place(target_yaw, LocalPlanner.ANGLE_TOLERANCE, turn_direction)
             self.move_linearly(np.array(waypoint), LocalPlanner.DISTANCE_TOLERANCE, "forward")
         rospy.loginfo("End of path following...")
+        self._follow_path_as.set_succeeded()
 
 if __name__ == "__main__":
     rospy.init_node('local_planner', log_level=rospy.INFO)
-
     local_planner = LocalPlanner()
+    rospy.spin()
 
-    PATH = [(1, 0), (1, 1), (0, 1), (0, 0)]
-
-    local_planner.follow_path(PATH)
+    # PATH = [(1, 0), (1, 1), (0, 1), (0, 0)] # Test variable for debugging
