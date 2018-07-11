@@ -32,7 +32,7 @@ class NavManager:
 
         # Subscribe to necessary topics
         self.tf_listener = tf.TransformListener()
-        rospy.Subscriber(self.static_map_topic, OccupancyGrid, self.static_map_callback)
+        self.static_map_sub = rospy.Subscriber(self.static_map_topic, OccupancyGrid, self.static_map_callback)
 
         # Declare common parameters
         self.static_map = None

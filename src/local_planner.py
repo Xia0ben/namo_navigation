@@ -60,16 +60,7 @@ class LocalPlanner(object):
 
         # rospy.loginfo("move_robot function called with twist : %s", self._twist_object)
 
-        """
-        The following loop is because publishing in topics sometimes fails the first time you publish.
-        In continuous publishing systems there is no big deal but in systems that publish only
-        once it IS very important.
-        """
-        while True:
-            connections = self._cmd_vel_pub.get_num_connections()
-            if connections > 0:
-                self._cmd_vel_pub.publish(self._twist_object)
-                break
+        Utils.publish_once(self._cmd_vel_pub, self._twist_object)
 
 
     # TODO Merge turn_in_place and move_linearly as move_to_target and use a
@@ -222,11 +213,6 @@ if __name__ == "__main__":
     
     test_goal.goal.path.poses = [pose_1, pose_2, pose_3, pose_4]
     
-    
-    while True:
-        connections = pub.get_num_connections()
-        if connections > 0:
-            pub.publish(test_goal)
-            break
+    Utils.publish_once(pub, test_goal)
     
     rospy.spin()

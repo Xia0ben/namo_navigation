@@ -1,10 +1,24 @@
 import rospy
 import tf
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Quaternion
 from nav_msgs.msg import Path
 
 class Utils:
     TF_LISTENER = tf.TransformListener()
+    
+    
+    """
+    The following loop is because publishing in topics sometimes fails the first time you publish.
+    In continuous publishing systems there is no big deal but in systems that publish only
+    once it IS very important.
+    """
+    @staticmethod
+    def publish_once(publisher, payload):
+        while True:
+            connections = self.publisher.get_num_connections()
+            if connections > 0:
+                self.publisher.publish(payload)
+                break
     
     @staticmethod
     def get_current_pose(map_frame, robot_frame):
@@ -43,6 +57,16 @@ class Utils:
                          geom_quat.z,
                          geom_quat.w]
         return tf.transformations.euler_from_quaternion(explicit_quat)[2]
+        
+    @staticmethod
+    def geom_quat_from_yaw(yaw):
+        explicit_quat = tf.transformations.quaternion_from_euler(0.0, 0.0, yaw)
+        geom_quat = Quaternion()
+        geom_quat.x = explicit_quat[0]
+        geom_quat.y = explicit_quat[1]
+        geom_quat.z = explicit_quat[2]
+        geom_quat.w = explicit_quat[3]
+        return geom_quat
     
     @staticmethod
     def ros_path_from_map_path(map_path, start_pose, end_pose, resolution, frame_id):

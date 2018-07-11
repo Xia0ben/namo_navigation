@@ -44,8 +44,8 @@ class MapManager:
         
         # Subscribe to appropriate topics
         self.tf_listener = tf.TransformListener()
-        rospy.Subscriber(self.static_map_topic, OccupancyGrid, self.static_map_callback)
-        rospy.Subscriber(self.scan_topic, LaserScan, self.scan_callback)
+        self.static_map_sub = rospy.Subscriber(self.static_map_topic, OccupancyGrid, self.static_map_callback)
+        self.scan_sub = rospy.Subscriber(self.scan_topic, LaserScan, self.scan_callback)
         
         # Initialize map
         while self.static_map is None:
