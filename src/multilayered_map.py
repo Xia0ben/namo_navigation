@@ -1,7 +1,6 @@
 #! /usr/bin/env python
 
 import math
-import numpy as np
 import copy
 
 from bresenham import bresenham
@@ -18,20 +17,20 @@ class MultilayeredMap:
     FREESPACE_COST_ROS = 0
     NEWPOINT_VALUE = -1
 
-    DBSCAN_EPSILON = 10
-    DBSCAN_MIN_SAMPLES = 1
-    DBSCAN_ALGORITHM = 'auto'
-    DBSCAN_METRIC = 'euclidean'
-    DBSCAN_METRIC_PARAMS = None
-    DBSCAN_LEAF_SIZE = 30
-    DBSCAN_P = None
-    N_JOBS = 1
+    # DBSCAN_EPSILON = 10
+    # DBSCAN_MIN_SAMPLES = 1
+    # DBSCAN_ALGORITHM = 'auto'
+    # DBSCAN_METRIC = 'euclidean'
+    # DBSCAN_METRIC_PARAMS = None
+    # DBSCAN_LEAF_SIZE = 30
+    # DBSCAN_P = None
+    # N_JOBS = 1
 
     PSEUDO_INFLATION_FOOTPRINT = [[1, 1, 1],
                                   [1, 1, 1],
                                   [1, 1, 1]]
 
-    def __init__(self, rosMap, robotDiameter):
+    def __init__(self, rosMap, robotDiameter, fov_radius, obstacles_dict = None):
         self.origin = rosMap.info.origin
         self.resolution = rosMap.info.resolution
         self.width = rosMap.info.width
@@ -44,15 +43,24 @@ class MultilayeredMap:
         self.pseudo_inflated_static_occ_grid = _get_pseudo_inflated_static_occ_grid()
 
         # Only contains non-static (potentially movable) obstacles data (chairs, boxes, tables, ...)
-        self.obstacle_occ_grid = np.zeros((self.width, self.height))
         self.obstacles = {}
-        self.obstacles
+        if obstacles_dict is not None:
+            for obstacle_id, obstacle_points_set in obstacles_dict.items():
+                self.obstacles.update({obstacle_id: Obstacle(obstacle_points_set, self.resolution, obstacle_id)})
 
         # Merged grid of static elements and obstacles, with inflation applied
         self.merged_occ_grid = copy.deepcopy(self.static_occ_grid)
+        compute_merged_occ_grid()
 
         self.robot = Robot(robotDiameter, fov_radius, self.resolution)
 
+    def compute_merged_occ_grid(self):
+        # FIXME
+        # Add all obstacles to the
+
+    @staticmethod
+    def is_in_fov(point, pose_np, radius):
+        return np.linalg.norm(np.array(point) - pose_np) <= radius
 
     def get_point_cloud_in_fov(self, current_pose):
         current_pose_np = np.array((current_pose.pose.position.x, current_pose.pose.position.y))
@@ -76,31 +84,63 @@ class MultilayeredMap:
             # radius. If not, then we simply go on to estimating the next obstacle.
             obstacle_bb = obstacle.shapely_multipoint.envelope.exterior.coords
             if len(obstacle_bb) - 1 > 4:
-                first_corner_distance = np.linalg.norm(np.array(obstacle_bb[0]) - current_pose_np)
-                second_corner_distance = np.linalg.norm(np.array(obstacle_bb[1]) - current_pose_np)
-                third_corner_distance = np.linalg.norm(np.array(obstacle_bb[2]) - current_pose_np)
-                fourth_corner_distance = np.linalg.norm(np.array(obstacle_bb[3]) - current_pose_np)
-                if (first_corner_distance > fov_radius and
-                    second_corner_distance > fov_radius and
-                    third_corner_distance > fov_radius and
-                    fourth_corner_distance > fov_radius):
-                    continue
+                if not (MultilayeredMap.is_in_fov(obstacle_bb[0], current_pose_np, radius) or
+                        MultilayeredMap.is_in_fov(obstacle_bb[1], current_pose_np, radius) or
+                        MultilayeredMap.is_in_fov(obstacle_bb[2], current_pose_np, radius) or
+                        MultilayeredMap.is_in_fov(obstacle_bb[3], current_pose_np, radius)):
+                        continue
             
             # Iterate over the points of the obstacle's point cloud and add them
             # to the point cloud in fov
             for point in obstacle.ros_point_cloud.points:
-                if np.linalg.norm(np.array((point.x, point.y)) - current_pose_np) <= fov_radius:
+                if MultilayeredMap.is_in_fov((point.x, point.y), current_pose_np, radius):
                     fov_point_cloud.points.append(point)
                     fov_point_cloud.channels[0].values.append(obstacle_id)
         
         return fov_point_cloud
 
-    def update_from_point_cloud(self, input_point_cloud):
-        to_remove_point_cloud = self.get_point_cloud_in_fov(self, current_pose)
-        
-        for point, obstacle_id_float in zip(input_point_cloud.points, input_point_cloud.channels[0].values):
+    def point_cloud_to_point_dict(point_cloud):
+        point_dict = {}
+        for point, obstacle_id_float in zip(point_cloud.points, point_cloud.channels[0].values):
             obstacle_id = int(obstacle_id_float)
-            if self.obstacles[obstacle_id].
+            # Try to add point to existing obstacle set
+            try:
+                point_dict[obstacle_id].add((point.x, point.y))
+            except KeyError:
+                # If obstacle doesn't exist add obstacle and add point to its set
+                point_dict.update({obstacle_id: {(point.x, point.y)}})
+        return point_dict
+
+    def update_from_point_cloud(self, input_point_cloud):
+        to_remove_point_dict = self.get_point_cloud_in_fov(self, current_pose)
+        to_create_obs_dict = {}
+        
+        for point32, obstacle_id_float in zip(input_point_cloud.points, input_point_cloud.channels[0].values):
+            obstacle_id = int(obstacle_id_float)
+            point = (point32.x, point32.y)
+            
+            try:
+                # Try to get the corresponding obstacle in obstacles dict
+                obstacle = self.obstacles[obstacle_id]
+            except KeyError:
+                # If obstacle is not found, create obstacle and add point to it
+                obstacle = Obstacle({point}, self.resolution, obstacle_id)
+                # Get to the next point
+                continue
+            
+            if obstacle.has_point(point):
+                # If input point exists in both point clouds, don't remove later
+                # from obstacle point cloud
+                to_remove_point_dict[obstacle_id].remove(point)
+            else:
+                # If input point doesn't exist in obstacle, add it
+                obstacle.add_point(point)
+        
+        # Remove all points that are not in common or have not just been added
+        # from obstacle point cloud
+        for obstacle_id, point_set in to_remove_point_dict.items():
+            for point in point_set:
+                self.obstacles[obstacle_id].remove_point(point)
         
     def has_free_space_been_created(self):
         # FIXME return true if we moved an object (or if an object moved by

@@ -10,28 +10,41 @@ import rospy
 class Obstacle:
     idCounter = 1
     
-    def __init__(self, frame_id, ros_point_cloud, ros_polygon, shapely_multipoint, map_points):
+    def __init__(self, points_set, resolution, obstacle_id):
         # Obstacle unique id
-        self.unique_id = Obstacle.idCounter
-        Obstacle.idCounter = Obstacle.idCounter + 1
+        self.unique_id = obstacle_id
         
         # Copy obstacle representations from parameters
-        self.frame_id = frame_id
-        self.ros_point_cloud = ros_point_cloud
-        self.ros_polygon = ros_polygon
-        self.shapely_multipoint = shapely_multipoint
-        self._point_set = 
-        self.map_points = map_points
+        self.points_set = points_set
+        
+        # Create alternate representations
+        self.shapely_multipoint = MultiPoint(list(points_set))
+        
+        self.map_points_set = map_points_set = set()
+        for point in points_set:
+            map_points_set.add((int(point[0] / resolution), int(point[1]/ resolution)))
+            
+        self.ros_point_cloud = PointCloud()
+        self.ros_point_cloud.header.seq = 1
+        self.ros_point_cloud.header.frame_id = frame_id
+        self.ros_point_cloud.header.stamp = rospy.Time(0)
+        self.ros_point_cloud.points = []
+        for point in points_set:
+            new_point32 = Point32()
+            new_point32.x = point[0]
+            new_point32.y = point[1]
+            self.ros_point_cloud.points.append(new_point32)
+        ros_point_cloud.points = points32
         
         # Create pose from centroid of shapely polygon
         self.pose = PoseStamped()
-        self.pose.header.seq = self.unique_id
+        self.pose.header.seq = 1
         self.pose.header.stamp = rospy.Time(0)
         self.pose.header.frame_id = frame_id
         self.pose.pose.position.x = shapely_multipoint.convex_hull.centroid.x
         self.pose.pose.position.y = shapely_multipoint.convex_hull.centroid.y
         
-        # FIXME Compute grasp Points.
+        # Compute grasp Points, which are the centers of each side of the convex hull
         self.graspPoints = None
         
         # FIXME Compute Bounding Box (rectangle with sides orthogonal to map axes)
@@ -45,46 +58,47 @@ class Obstacle:
         # Obstacle semantic
         self.isMovable = True
         
-    @classmethod
-    # We assume that the ros_polygon has more than or has three points
-    def from_ros_polygon(cls, ros_polygon, resolution, frame_id):
-        # Create map points from the polygon coordinates
-        map_points = set()
-        for i in range(len(ros_polygon.points) - 1):
-            line_points = list(
-                bresenham(int(ros_polygon.points[i].x / resolution), # x1
-                          int(ros_polygon.points[i].y / resolution), # y1
-                          int(ros_polygon.points[i + 1].x / resolution),  # x2
-                          int(ros_polygon.points[i + 1].y / resolution))) # y2
-            for point in line_points:
-                map_points.add(point)
-        # Add the line between last point of the polygon and first point
-        last_line = list(
-                bresenham(int(ros_polygon.points[len(ros_polygon.points) - 1].x / resolution), # x1
-                          int(ros_polygon.points[len(ros_polygon.points) - 1].y / resolution), # y1
-                          int(ros_polygon.points[0].x / resolution),  # x2
-                          int(ros_polygon.points[0].y / resolution))) # y2
-        for point in last_line:
-            map_points.add(point)
+            
+    # @classmethod
+    # # We assume that the ros_polygon has more than or has three points
+    # def from_ros_polygon(cls, ros_polygon, resolution, frame_id):
+    #     # Create map points from the polygon coordinates
+    #     map_points = set()
+    #     for i in range(len(ros_polygon.points) - 1):
+    #         line_points = list(
+    #             bresenham(int(ros_polygon.points[i].x / resolution), # x1
+    #                       int(ros_polygon.points[i].y / resolution), # y1
+    #                       int(ros_polygon.points[i + 1].x / resolution),  # x2
+    #                       int(ros_polygon.points[i + 1].y / resolution))) # y2
+    #         for point in line_points:
+    #             map_points.add(point)
+    #     # Add the line between last point of the polygon and first point
+    #     last_line = list(
+    #             bresenham(int(ros_polygon.points[len(ros_polygon.points) - 1].x / resolution), # x1
+    #                       int(ros_polygon.points[len(ros_polygon.points) - 1].y / resolution), # y1
+    #                       int(ros_polygon.points[0].x / resolution),  # x2
+    #                       int(ros_polygon.points[0].y / resolution))) # y2
+    #     for point in last_line:
+    #         map_points.add(point)
         
-        # Create point cloud from map_points
-        ros_point_cloud = PointCloud()
-        ros_point_cloud.header.seq = 1
-        ros_point_cloud.header.frame_id = frame_id
-        ros_point_cloud.header.stamp = rospy.Time(0)
+    #     # Create point cloud from map_points
+    #     ros_point_cloud = PointCloud()
+    #     ros_point_cloud.header.seq = 1
+    #     ros_point_cloud.header.frame_id = frame_id
+    #     ros_point_cloud.header.stamp = rospy.Time(0)
         
-        points32 = []
-        for point in map_points:
-            new_point32 = Point32()
-            new_point32.x = point[0] * resolution
-            new_point32.y = point[1] * resolution
-            points32.append(new_point32)
-        ros_point_cloud.points = points32
+    #     points32 = []
+    #     for point in map_points:
+    #         new_point32 = Point32()
+    #         new_point32.x = point[0] * resolution
+    #         new_point32.y = point[1] * resolution
+    #         points32.append(new_point32)
+    #     ros_point_cloud.points = points32
         
-        # Create shapely multipoint from point cloud
-        shapely_polygon = Obstacle.ros_polygon_to_shapely_multipoint(ros_polygon)
+    #     # Create shapely multipoint from point cloud
+    #     shapely_polygon = Obstacle.ros_polygon_to_shapely_multipoint(ros_polygon)
         
-        return cls(frame_id, ros_point_cloud, ros_polygon, shapely_multipoint, map_points)
+    #     return cls(frame_id, ros_point_cloud, ros_polygon, shapely_multipoint, map_points)
         
     @classmethod
     def from_ros_point_cloud(cls, ros_point_cloud, resolution, frame_id, is_axis_rectangle = False):
@@ -107,11 +121,12 @@ class Obstacle:
         
         return cls(frame_id, ros_point_cloud, ros_polygon, shapely_multipoint, map_points)
 
-    def add_points(self, points):
+    def add_point(self, point):
         
     def remove_points(self, points):
         
-    def 
+    def has_point(self, point):
+        
 
     @staticmethod
     def ros_polygon_to_shapely_multipoint(ros_polygon):

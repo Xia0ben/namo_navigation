@@ -1,5 +1,6 @@
 import rospy
 import tf
+import math
 from geometry_msgs.msg import PoseStamped, Quaternion
 from nav_msgs.msg import Path
 
@@ -129,3 +130,7 @@ class Utils:
             numpy.array([goal_pose.pose.position.x, goal_pose.pose.position.y]) -
             numpy.array([init_pose.pose.position.x, init_pose.pose.position.y])
         )
+
+    @staticmethod
+    def euclidean_distance(point_tuple_a, point_tuple_b):
+        return math.sqrt((point_tuple_b[0] - point_tuple_a[0]) ** 2 + (point_tuple_b[1] - point_tuple_a[1]) ** 2)
