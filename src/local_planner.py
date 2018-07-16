@@ -169,14 +169,14 @@ class LocalPlanner(object):
             local_target_direction = np.array([current_subgoal_local.pose.position.x, current_subgoal_local.pose.position.y])
             local_target_direction_norm = np.linalg.norm(local_target_direction)
 
-            if current_subgoal_local.pose.position.x < 0:
+            if local_target_direction < 0:
                 rospy.loginfo("Complement acos because we are outside of range 0 to 180 deg.")
-                target_local_yaw = math.pi - math.acos(np.dot(local_target_direction, LocalPlanner.UNIT_VECTOR) /
+                target_local_yaw = 2 * math.pi - math.acos(np.dot(local_target_direction, LocalPlanner.UNIT_VECTOR) /
                     local_target_direction_norm)
             else:
                 rospy.loginfo("Don't complement acos.")
-                target_local_yaw = math.acos(np.dot(local_target_direction, LocalPlanner.UNIT_VECTOR) /
-                    local_target_direction_norm)
+                target_local_yaw = math.acos(local_target_direction[0] /
+                    math.sqrt(local_target_direction[0] ** 2 + local_target_direction[1] ** 2))
 
             target_yaw = self.modulo_pi(current_yaw + target_local_yaw)
             target_distance = local_target_direction_norm
@@ -192,12 +192,12 @@ class LocalPlanner(object):
 if __name__ == "__main__":
     rospy.init_node('local_planner', log_level=rospy.INFO)
     local_planner = LocalPlanner()
-    
+
     # Test code :
     # PATH = [(1, 0), (1, 1), (0, 1), (0, 0)] # Test variable for debugging
     pub = rospy.Publisher('/follow_path_as/goal', FollowPathActionGoal, queue_size=1)
     test_goal = FollowPathActionGoal()
-    
+
     pose_1 = PoseStamped()
     pose_1.pose.position.x = 1.0
     pose_1.pose.position.y = 0.0
@@ -210,9 +210,9 @@ if __name__ == "__main__":
     pose_4 = PoseStamped()
     pose_4.pose.position.x = 0.0
     pose_4.pose.position.y = 0.0
-    
+
     test_goal.goal.path.poses = [pose_1, pose_2, pose_3, pose_4]
-    
+
     Utils.publish_once(pub, test_goal)
-    
+
     rospy.spin()

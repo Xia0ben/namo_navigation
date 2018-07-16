@@ -22,7 +22,8 @@ class NavManager:
     def __init__(self):
         # Get parameters
         self.static_map_topic = "/map" # rospy.get_param('~map_topic')
-        self.robot_diameter = "0.5" # [m] rospy.get_param('~robot_diameter')
+        self.robot_radius = "0.5" # [m] rospy.get_param('~robot_radius')
+        self.robot_fov_radius = "2.0" # [m] rospy.get_param('~robot_fov_radius')
         self.map_frame = "/map" # rospy.get_param('~map_frame')
         self.robot_frame = "/base_link" # rospy.get_param('~robot_frame')
         self.move_cost = 1.0 # rospy.get_param('~move_cost')
@@ -43,7 +44,7 @@ class NavManager:
         # Initialize map
         while self.static_map is None:
             rospy.sleep(0.2)
-        self.navigation_map = MultilayeredMap(self.static_map, self.robot_diameter)
+        self.navigation_map = MultilayeredMap(self.static_map, self.robot_radius, self.robot_fov_radius)
 
 
     def _static_map_callback(self, new_map):
@@ -187,7 +188,7 @@ class NavManager:
                             move_cost = self.move_cost, push_cost = self.push_cost)
                 cEst = c1.cost + c3_est.cost + seq * self.push_cost
 
-                while (obstacle.pushUsingGraspPointPossible(graspPoint, map) and cEst <= optimal_plan.cost):
+                while (obstacle.pushUsingGraspPointPossible(graspPoint, translation_vector) and cEst <= optimal_plan.cost):
                     if (_check_new_opening(map, obstacle, [one_push_in_d], blocking_areas)):
                         obstacle.simPose.pos = obstacle.simPose.pos + one_push_in_d
                         # FIXME both points
