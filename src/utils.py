@@ -7,6 +7,11 @@ from nav_msgs.msg import Path
 class Utils:
     TF_LISTENER = tf.TransformListener()
 
+    ROS_COST_LETHAL = 254
+    ROS_COST_INSCRIBED = 253
+    ROS_COST_POSSIBLY_CIRCUMSCRIBED = 128
+    ROS_COST_POSSIBLY_NONFREE = 1
+    ROS_COST_FREE_SPACE = 0
 
     """
     The following loop is because publishing in topics sometimes fails the first time you publish.
@@ -177,7 +182,7 @@ class Utils:
     @staticmethod
     def _is_in_matrix(x, y, width, height) :
         return True if (x >= 0 and x < width and y >= 0 and y < height) else False
-        
+
     @staticmethod
     def get_corners_float_coords(int_coord_x, int_coord_y):
         return [(float(int_coord_x), float(int_coord_y)), (float(int_coord_x) + 1.0, float(int_coord_y)), (float(int_coord_x) + 1.0, float(int_coord_y) + 1.0), (float(int_coord_x), float(int_coord_y) + 1.0)]

@@ -44,35 +44,49 @@ class Obstacle:
     # which allows us to use a convex hull to determine the safe swept area,
     # rather than a concave hull which is computationnaly more challenging.
     # See : http://blog.thehumangeo.com/2014/05/12/drawing-boundaries-in-python/
-    def get_safe_swept_polygon(self, translation_vector):
+    def _get_manipulation_polygon(self, translation_vector):
         current_polygon = copy.deepcopy(self.polygon)
         new_polygon = affinity.translate(current_polygon, translation_vector[0], translation_vector[1])
-        safe_swept_polygon = current_polygon.union(new_polygon).convex_hull
-        return safe_swept_polygon
+        manipulation_polygon = current_polygon.union(new_polygon).convex_hull
+        return manipulation_polygon
 
-    def get_safe_swept_area_map_points(self, translation_vector):
-        safe_swept_area_map_points = set()
+    def get_manipulation_area_map_points(self, translation_vector):
+        manipulation_area_map_points = set()
 
-        safe_swept_polygon = self.get_safe_swept_polygon(translation_vector)
+        manipulation_polygon = self._get_manipulation_polygon(translation_vector)
 
-        if type(safe_swept_polygon) is LineString:
-            coords = list(safe_swept_polygon.coords)
-            safe_swept_area_map_points = set(
+        if type(manipulation_polygon) is LineString:
+            coords = list(manipulation_polygon.coords)
+
+            # Check if manipulation causes to be out of map bounds
+            # If yes, return empty set
+            if not Utils._is_in_matrix(coords[0][0], coords[0][1], self.map_metadata.width, self.map_metadata.height) or
+                not Utils._is_in_matrix(coords[1][0], coords[1][1], self.map_metadata.width, self.map_metadata.height):
+                return set()
+
+            manipulation_area_map_points = set(
                 bresenham(int(coords[0][0] / self.map_metadata.resolution), # x1
                           int(coords[0][1] / self.map_metadata.resolution), # y1
                           int(coords[1][0] / self.map_metadata.resolution),  # x2
                           int(coords[1][1] / self.map_metadata.resolution))) # y2
         else:
-            x, y = safe_swept_polygon.envelope.exterior.xy
+            x, y = manipulation_polygon.envelope.exterior.xy
             bb_top_left_corner = (int(min(x) / self.map_metadata.resolution), int(min(y) / self.map_metadata.resolution))
             bb_bottom_right_corner = (int(max(x) / self.map_metadata.resolution), int(max(y) / self.map_metadata.resolution))
+
+            # Check if manipulation causes to be out of map bounds
+            # If yes, return empty set
+            if not Utils._is_in_matrix(bb_top_left_corner[0][0], bb_top_left_corner[0][1], self.map_metadata.width, self.map_metadata.height) or
+                not Utils._is_in_matrix(bb_bottom_right_corner[1][0], bb_bottom_right_corner[1][1], self.map_metadata.width, self.map_metadata.height):
+                return set()
+
             for i in range(bb_top_left_corner[0], bb_bottom_right_corner[0]):
                 for j in range(bb_top_left_corner[1], bb_bottom_right_corner[1]):
                     for corner in Utils.get_corners_float_coords(i, j):
-                        if safe_swept_polygon.contains(Point(corner)):
-                            safe_swept_area_map_points.add((i, j))
+                        if manipulation_polygon.contains(Point(corner)):
+                            manipulation_area_map_points.add((i, j))
 
-        return safe_swept_area_map_points
+        return manipulation_area_map_points
 
     def update(self, to_add_points_set, to_remove_points_set):
         # Update points_set
@@ -246,13 +260,14 @@ class Obstacle:
         width = matrixBottomRightX - matrixTopLeftX
         height = matrixBottomRightY - matrixTopLeftY
 
-        return Utils._get_inflastamped_matrix(discretized_polygon,
-                                        footprint,
-                                        width,
-                                        height,
-                                        matrixTopLeftX,
-                                        matrixTopLeftY,
-                                        removeObstaclePoints)
+        return {"top_left_corner": (matrixTopLeftX, matrixTopLeftY),
+            "matrix": Utils._get_inflastamped_matrix(discretized_polygon,
+                                                     footprint,
+                                                     width,
+                                                     height,
+                                                     matrixTopLeftX,
+                                                     matrixTopLeftY,
+                                                     removeObstaclePoints)}
 
     def __hash__(self):
         # Hash depends only on the unique and immutable id of the obstacle

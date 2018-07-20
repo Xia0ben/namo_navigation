@@ -61,7 +61,7 @@ class Plan:
 
 
     def intersects_with_obstacles(self, occupancy_grid):
-
+        
 
         """
         Use the following four lines if you would rather test intersection

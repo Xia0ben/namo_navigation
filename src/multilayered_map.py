@@ -183,7 +183,7 @@ class MultilayeredMap:
         positions = set()
         for x in range(len(self.static_occ_grid)):
             for y in range(len(self.static_occ_grid[0])):
-                if self.static_occ_grid[x][y] == MultilayeredMap.LETHAL_COST_ROS:
+                if self.static_occ_grid[x][y] == Utils.ROS_COST_LETHAL:
                     positions.add(x, y)
         return positions
 
@@ -192,75 +192,3 @@ class MultilayeredMap:
                                         MultilayeredMap.PSEUDO_INFLATION_FOOTPRINT,
                                         self.info.width,
                                         self.info.height)
-
-    # def update_laserscan(self, pointsWithDistance, robot_pose, obstacle_range, raytrace_range):
-    #     updated_obstacle_occ_grid = copy.deepcopy(self.obstacle_occ_grid)
-    #     updated_obstacles = copy.deepcopy(self.obstacles)
-
-    #     ### Clearing ###
-    #     ## Raytracing method ##
-    #     # Use bresenham algorithm to trace lines in 2D:
-    #     # (https://en.wikipedia.org/wiki/Bresenham's_line_algorithm)
-    #     # list(bresenham) returns an array of tuples [(x,y), ...]
-    #     pointsToClear = set()
-    #     for point, distance in pointsWithDistance.items():
-    #         if distance <= raytrace_range:
-    #             line_points = list(
-    #                 bresenham(robot_pose.pos.coords[0], # x1
-    #                           robot_pose.pos.coords[1], # y1
-    #                           point.coords[0],  # x2
-    #                           point.coords[1])) # y2
-    #             for point in line_points:
-    #                 pointsToClear.add(point)
-
-    #     # pointsToClear is a set of tuples set([(x,y), ...])
-    #     new_cleared_points = []
-    #     for point in pointsToClear:
-    #         # TODO Maybe use a function that degrades over time, starting from
-    #         # 127 (free space) going to 0, over 20 seconds ?
-    #         # Would need to update inflation function to take this kind of case
-    #         # into account.
-    #         current_obstacle_id = self.updated_obstacle_occ_grid[point[0]][point[1]]
-    #         if current_obstacle_id > 0:
-    #             self.updated_obstacle_occ_grid[point[0]][point[1]] = MultilayeredMap.FREESPACE_COST_ROS
-    #             updated_obstacles[current_obstacle_id].removePoin # FIXME FINISH THIS LINE
-    #             new_cleared_points.append(SimplePosition(point[0], point[1]))
-
-    #     ## "Conetracing" method ##
-    #     # Draw polygons of successive clearable points of the laser_points list
-    #     # And remove all registered points within them
-    #     # TODO Implement this idea if appropriate
-
-    #     ### Marking and Static Map Overlap Checking ###
-    #     # Add points only if within marking distance, and that they are not in
-    #     # a pseudo inflated static occupation spot
-    #     for point, distance in pointsWithDistance.items():
-    #         isInRange = (distance <= obstacle_range)
-    #         isInMatrix = _is_in_matrix(point.coords[0], point.coords[1],
-    #                                   self.info.width, self.info.height)
-    #         isNotInPseudo = (self.pseudo_inflated_static_occ_grid[point.coords[0]][point.coords[1]] == 0)
-    #         if (isInRange and isInMatrix and isNotInPseudo):
-    #             self.updated_obstacle_occ_grid = MultilayeredMap.LETHAL_COST_ROS
-
-
-    #     # Clusterize points into separate obstacles
-    #     db = DBSCAN(eps=MultilayeredMap.DBSCAN_EPSILON,
-    #         min_samples=MultilayeredMap.DBSCAN_MIN_SAMPLES,
-    #         algorithm=MultilayeredMap.DBSCAN_ALGORITHM ,
-    #         metric=MultilayeredMap.DBSCAN_METRIC,
-    #         metric_params=MultilayeredMap.DBSCAN_METRIC_PARAMS,
-    #         leaf_size=MultilayeredMap.DBSCAN_LEAF_SIZE,
-    #         p=MultilayeredMap.DBSCAN_P,
-    #         n_jobs=MultilayeredMap.N_JOBS).fit(npObstaclePoints)
-
-    #     cluster_labels = db.labels_
-    #     n_clusters = len(set(cluster_labels)) - (1 if -1 in cluster_labels else 0)
-
-    #     # get the clusters
-    #     # cluster_labels = -1 means outliers, we ignore it
-    #     clusters = []
-    #     for cluster_label in range(n_clusters):
-    #         clusters.append([])
-
-    #     for i in range(len(cluster_labels)):
-    #         clusters[cluster_labels[i]].append(npObstaclePoints[i])

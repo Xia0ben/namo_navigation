@@ -29,5 +29,5 @@ class RobotMetaData:
             for y in range(footprint_length):
                 for corner in Utils.get_corners_float_coords(x, y):
                     if math.sqrt((corner[0] - circle_center) ** 2.0 + (corner[1] - circle_center) ** 2.0) <= pixel_radius:
-                        footprint[x][y] = 2
+                        footprint[x][y] = Utils.ROS_COST_POSSIBLY_CIRCUMSCRIBED
         return footprint
