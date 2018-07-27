@@ -1,11 +1,11 @@
 #! /usr/bin/env python
 
-import math
+import rospy
+import numpy as np
 import copy
-from bresenham import bresenham
-from pose import Pose
-from sensor_msgs import PointCloud, ChannelFloat32
+from sensor_msgs.msg import PointCloud, ChannelFloat32
 from obstacle import Obstacle
+from utils import Utils
 
 class MultilayeredMap:
     LETHAL_COST_ROS = 254
@@ -21,37 +21,40 @@ class MultilayeredMap:
     # DBSCAN_P = None
     # N_JOBS = 1
 
-    PSEUDO_INFLATION_FOOTPRINT = [[1, 1, 1],
-                                  [1, 1, 1],
-                                  [1, 1, 1]]
+    PSEUDO_INFLATION_FOOTPRINT = [[Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
+                                  [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
+                                  [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL]]
 
-    def __init__(self, rosMap, frame_id, robot_radius, fov_radius, obstacles_dict = None):
-        self.info = rosMap.info.origin
-        self.robot_metadata = RobotMetaData(robot_radius, fov_radius, self.info.resolution)
+    def __init__(self, rosMap, frame_id, robot_metadata):
+        self.info = rosMap.info
+        self.robot_metadata = robot_metadata
         self.frame_id = frame_id
         # Only contains static obstacles data (walls, static furniture, ...)
         # as defined in the map given to the map server
         self.static_occ_grid = np.array(rosMap.data).reshape(
-            (self.info.width, self.info.height))
-        self.static_obstacles_positions = _get_static_obstacles_positions()
-        self.pseudo_inflated_static_occ_grid = _get_pseudo_inflated_static_occ_grid()
+            (self.info.height, self.info.width))
+        self.static_occ_grid[self.static_occ_grid == 100] = 254 # WORKAROUND FOR IMPORT WITH RAW VALUES THAT DOES NOT WORK AS INTENDED
+        self.static_obstacles_positions = self._get_static_obstacles_positions()
+        # self.pseudo_inflated_static_occ_grid = self._get_pseudo_inflated_static_occ_grid(MultiLayeredMap.PSEUDO_INFLATION_FOOTPRINT)
+        self.inflated_static_occ_grid = self._get_inflated_static_occ_grid(robot_metadata.footprint)
+
 
         # Only contains non-static (potentially movable) obstacles data (chairs, boxes, tables, ...)
         self.obstacles = {}
-        if obstacles_dict is not None:
-            for obstacle_id, obstacle_points_set in obstacles_dict.items():
-                self.obstacles.update({obstacle_id: Obstacle(obstacle_points_set, self.info, self.frame_id, self.robot_metadata, obstacle_id, True)})
 
         # Merged grid of static elements and obstacles, with inflation applied
-        self.merged_occ_grid = copy.deepcopy(self.static_occ_grid)
-        compute_merged_occ_grid()
+        self.merged_occ_grid = copy.deepcopy(self.inflated_static_occ_grid)
+        self.compute_merged_occ_grid()
 
+    def manually_add_obstacle(self, obstacle):
+        self.obstacles.update({obstacle.obstacle_id: obstacle})
 
     def compute_merged_occ_grid(self):
         # FIXME
         # Add all obstacles to the
+        pass
 
-    @staticmethod
+    #@staticmethod
     def is_in_fov(point, pose_np, radius):
         return np.linalg.norm(np.array(point) - pose_np) <= radius
 
@@ -71,21 +74,21 @@ class MultilayeredMap:
         # For all obstacles that are close enough from current robot pose,
         # evaluate if their points are in the field of vision (fov) of the robot
         # and add them to the point cloud if they are.
-        for obstacle_id, obstacle in obstacles.items():
+        for obstacle_id, obstacle in self.obstacles.items():
             # If obstacle is characterized by more than four points, it is more
             # interesting to first check if its boundaries are within the fov
             # radius. If not, then we simply go on to estimating the next obstacle.
             if len(obstacle.envelope) - 1 > 4:
-                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, radius)):
+                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, fov_radius)):
                         continue
 
             # Iterate over the points of the obstacle's point cloud and add them
             # to the point cloud in fov
             for point in obstacle.ros_point_cloud.points:
-                if MultilayeredMap.is_in_fov((point.x, point.y), current_pose_np, radius):
+                if MultilayeredMap.is_in_fov((point.x, point.y), current_pose_np, fov_radius):
                     fov_point_cloud.points.append(point)
                     fov_point_cloud.channels[0].values.append(obstacle_id)
 
@@ -100,15 +103,15 @@ class MultilayeredMap:
         # For all obstacles that are close enough from current robot pose,
         # evaluate if their points are in the field of vision (fov) of the robot
         # and add them to the point cloud if they are.
-        for obstacle_id, obstacle in obstacles.items():
+        for obstacle_id, obstacle in self.obstacles.items():
             # If obstacle is characterized by more than four points, it is more
             # interesting to first check if its boundaries are within the fov
             # radius. If not, then we simply go on to estimating the next obstacle.
             if len(obstacle.envelope) - 1 > 4:
-                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, radius)):
+                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, fov_radius) or
+                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, fov_radius)):
                         continue
 
             fov_point_dict.update({obstacle_id, set()})
@@ -116,7 +119,7 @@ class MultilayeredMap:
             # Iterate over the points of the obstacle's point cloud and add them
             # to the point cloud in fov
             for point in obstacle.points_set:
-                if MultilayeredMap.is_in_fov(point, current_pose_np, radius):
+                if MultilayeredMap.is_in_fov(point, current_pose_np, fov_radius):
                     fov_point_dict[obstacle_id].add()
 
         return fov_point_dict
@@ -133,7 +136,7 @@ class MultilayeredMap:
     #             point_dict.update({obstacle_id: {(point.x, point.y)}})
     #     return point_dict
 
-    def update_from_point_cloud(self, input_point_cloud):
+    def update_from_point_cloud(self, input_point_cloud, current_pose):
         to_remove_point_dict = self.get_point_cloud_in_fov(current_pose)
         to_add_point_dict = {}
         to_create_obs_dict = {}
@@ -147,7 +150,7 @@ class MultilayeredMap:
                 obstacle = self.obstacles[obstacle_id]
             except KeyError:
                 # If obstacle is not found, create obstacle and add point to it
-                obstacle = Obstacle({point}}, self.info, self.frame_id, self.robot_metadata, obstacle_id, True)
+                obstacle = Obstacle({point}, self.info, self.frame_id, self.robot_metadata, obstacle_id, True)
                 # Get to the next point
                 continue
 
@@ -184,11 +187,11 @@ class MultilayeredMap:
         for x in range(len(self.static_occ_grid)):
             for y in range(len(self.static_occ_grid[0])):
                 if self.static_occ_grid[x][y] == Utils.ROS_COST_LETHAL:
-                    positions.add(x, y)
+                    positions.add((x, y))
         return positions
 
-    def _get_pseudo_inflated_static_occ_grid(self):
+    def _get_inflated_static_occ_grid(self, footprint):
         return Utils._get_inflastamped_matrix(self.static_obstacles_positions,
-                                        MultilayeredMap.PSEUDO_INFLATION_FOOTPRINT,
-                                        self.info.width,
-                                        self.info.height)
+                                                footprint,
+                                                len(self.static_occ_grid),
+                                                len(self.static_occ_grid[0]))

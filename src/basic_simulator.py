@@ -21,8 +21,8 @@ class BasicSimulator:
         self.robot_fov_radius = "3.0" # [m] rospy.get_param('~robot_fov_radius')
         self.init_robot_2d_position = [0.0, 0.0] # rospy.get_param('~init_robot_position')
         self.init_robot_yaw = 0.0 # rospy.get_param('~init_robot_yaw')
--       self.init_robot_twist = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # rospy.get_param('~init_robot_twist')
-`       self.robot_polygonal_footprint = Point(self.init_robot_2d_position).buffer(robot_diameter / 2.0)
+        self.init_robot_twist = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # rospy.get_param('~init_robot_twist')
+        self.robot_polygonal_footprint = Point(self.init_robot_2d_position).buffer(robot_diameter / 2.0)
         self.arbitrary_obstacles = {
             1: {(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)}
         }

@@ -18,7 +18,7 @@ class RobotMetaData:
     def get_odd_circular_footprint(radius, resolution):
         diameter = float(radius) * 2.0
         pixel_radius = round(radius / resolution)
-        footprint_length = round(diameter / resolution) + 2
+        footprint_length = int(round(diameter / resolution))
         footprint_length = footprint_length if footprint_length % 2 != 0 else footprint_length + 1
 
         footprint = np.zeros((footprint_length, footprint_length), dtype=int)
@@ -31,3 +31,13 @@ class RobotMetaData:
                     if math.sqrt((corner[0] - circle_center) ** 2.0 + (corner[1] - circle_center) ** 2.0) <= pixel_radius:
                         footprint[x][y] = Utils.ROS_COST_POSSIBLY_CIRCUMSCRIBED
         return footprint
+
+if __name__ == '__main__':
+    # Basic test
+    rmd = RobotMetaData(0.025, 1.0, 0.05)
+    print(rmd.radius)
+    print(rmd.radius_div_by_sqrt_2)
+    print(rmd.diameter)
+    print(rmd.fov_radius)
+    print(rmd.footprint)
+    print(rmd.footprint_2X)

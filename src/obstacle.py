@@ -1,17 +1,18 @@
-from geometry_msgs.msg import Point32, PoseStamped, Polygon as RosPolygon
-from sensor_msgs import PointCloud
+from geometry_msgs.msg import Point32, PoseStamped
+from sensor_msgs.msg import PointCloud, ChannelFloat32
 from bresenham import bresenham
-from shapely.geometry import Point, MultiPoint
+from shapely.geometry import Point, MultiPoint, LineString
 from shapely import affinity
 from utils import Utils
 
 import rospy
 import copy
+import math
 
 class Obstacle:
     idCounter = 1
 
-    def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, axis_rect_hypothesis = True):
+    def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable = True, axis_rect_hypothesis = True):
         # Copy obstacle representations from parameters
         self.points_set = points_set
         self.map_metadata = map_metadata
@@ -21,7 +22,7 @@ class Obstacle:
         self.axis_rect_hypothesis = axis_rect_hypothesis
 
         # Obstacle semantic
-        self.isMovable = True
+        self.is_movable = is_movable
 
         # Create subsequent properties
         self._shapely_multipoint = None
@@ -40,6 +41,14 @@ class Obstacle:
         # Update subsequent properties
         self._update_alternate_representations()
 
+    # CLASS METHOD TO CREATE POLYGON SET OF POINTS TO GIVE TO CONSTRUCTOR
+    @classmethod
+    def from_points_make_polygon(cls, polygon_vertices_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable = True, axis_rect_hypothesis = True):
+        shapely_multipoint = MultiPoint(list(polygon_vertices_set))
+        discretized_polygon = Obstacle._make_discretized_polygon(shapely_multipoint.convex_hull, shapely_multipoint.convex_hull, map_metadata.resolution)
+        points_set = Utils.map_coords_to_real_coords(discretized_polygon, map_metadata.resolution)
+        return cls(points_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable, axis_rect_hypothesis)
+
     # We assume that the robot goes in a straight line when moving the object,
     # which allows us to use a convex hull to determine the safe swept area,
     # rather than a concave hull which is computationnaly more challenging.
@@ -52,7 +61,6 @@ class Obstacle:
 
     def get_manipulation_area_map_points(self, translation_vector):
         manipulation_area_map_points = set()
-
         manipulation_polygon = self._get_manipulation_polygon(translation_vector)
 
         if type(manipulation_polygon) is LineString:
@@ -60,8 +68,8 @@ class Obstacle:
 
             # Check if manipulation causes to be out of map bounds
             # If yes, return empty set
-            if not Utils._is_in_matrix(coords[0][0], coords[0][1], self.map_metadata.width, self.map_metadata.height) or
-                not Utils._is_in_matrix(coords[1][0], coords[1][1], self.map_metadata.width, self.map_metadata.height):
+            if (not Utils._is_in_matrix(coords[0][0], coords[0][1], self.map_metadata.width, self.map_metadata.height) or
+                not Utils._is_in_matrix(coords[1][0], coords[1][1], self.map_metadata.width, self.map_metadata.height)):
                 return set()
 
             manipulation_area_map_points = set(
@@ -76,8 +84,8 @@ class Obstacle:
 
             # Check if manipulation causes to be out of map bounds
             # If yes, return empty set
-            if not Utils._is_in_matrix(bb_top_left_corner[0][0], bb_top_left_corner[0][1], self.map_metadata.width, self.map_metadata.height) or
-                not Utils._is_in_matrix(bb_bottom_right_corner[1][0], bb_bottom_right_corner[1][1], self.map_metadata.width, self.map_metadata.height):
+            if (not Utils._is_in_matrix(bb_top_left_corner[0][0], bb_top_left_corner[0][1], self.map_metadata.width, self.map_metadata.height) or
+                not Utils._is_in_matrix(bb_bottom_right_corner[1][0], bb_bottom_right_corner[1][1], self.map_metadata.width, self.map_metadata.height)):
                 return set()
 
             for i in range(bb_top_left_corner[0], bb_bottom_right_corner[0]):
@@ -96,6 +104,9 @@ class Obstacle:
         self._update_alternate_representations()
 
     def _update_alternate_representations(self):
+        # TODO ADD CHECK THAT ALL POINTS FROM self.points_set ARE INDEED WITHIN THE MAP !!!
+        # IF NOT, SEND EXCEPTION (WILL HAVE TO CATCH THIS EXCEPTION ANYWHERE AN OBSTACLE IS CREATED OR UPDATED)
+
         # Shapely multipoint for determining envelope, convex hull, centroid
         self._shapely_multipoint = MultiPoint(list(self.points_set))
 
@@ -109,8 +120,8 @@ class Obstacle:
         # Points in integer map coordinates
         self.map_points_set = set()
         for point in self.points_set:
-            self.map_points_set.add((int(point.x / self.map_metadata.resolution),
-                int(point.y / self.map_metadata.resolution)))
+            self.map_points_set.add((int(point[0] / self.map_metadata.resolution),
+                int(point[1] / self.map_metadata.resolution)))
 
         # Envelope corners coordinates
         if type(self.envelope) is Point:
@@ -121,7 +132,7 @@ class Obstacle:
         self.bb_bottom_right_corner = (int(max(x) / self.map_metadata.resolution), int(max(y) / self.map_metadata.resolution))
 
         # Discretized polygon as points in integer map coordinates
-        self.discretized_polygon = self._make_discretized_polygon(self.convex_hull, self.polygon)
+        self.discretized_polygon = Obstacle._make_discretized_polygon(self.convex_hull, self.polygon, self.map_metadata.resolution)
 
         ## Dependency on previously set attributes is specified as function call parameter
 
@@ -141,11 +152,12 @@ class Obstacle:
         self.obstacle_matrix = self._make_inflated_obstacle_grid(self.bb_top_left_corner, self.bb_bottom_right_corner, self.discretized_polygon,  self.robot_metadata.footprint_2X, removeObstaclePoints = True)
         self.robot_inflated_obstacle = self._make_inflated_obstacle_grid(self.bb_top_left_corner, self.bb_bottom_right_corner, self.discretized_polygon, self.robot_metadata.footprint, removeObstaclePoints = False)
 
-    def _make_discretized_polygon(self, convex_hull, polygon):
+    @staticmethod
+    def _make_discretized_polygon(convex_hull, polygon, resolution):
         discretized_polygon = set()
         if type(convex_hull) is Point:
-            discretized_polygon = {(int(convex_hull.x / self.map_metadata.resolution),
-                int(convex_hull.y / self.map_metadata.resolution))}
+            discretized_polygon = {(int(convex_hull.x / resolution),
+                int(convex_hull.y / resolution))}
         if type(convex_hull) is LineString:
             polygon_vertices = list(convex_hull.coords)
         else:
@@ -153,10 +165,10 @@ class Obstacle:
 
         for i in range(len(polygon_vertices) - 1):
             discretized_polygon = discretized_polygon | set(
-                bresenham(int(polygon_vertices[i][0] / self.map_metadata.resolution), # x1
-                          int(polygon_vertices[i][1] / self.map_metadata.resolution), # y1
-                          int(polygon_vertices[i + 1][0] / self.map_metadata.resolution),  # x2
-                          int(polygon_vertices[i + 1][1] / self.map_metadata.resolution))) # y2
+                bresenham(int(polygon_vertices[i][0] / resolution), # x1
+                          int(polygon_vertices[i][1] / resolution), # y1
+                          int(polygon_vertices[i + 1][0] / resolution),  # x2
+                          int(polygon_vertices[i + 1][1] / resolution))) # y2
         return discretized_polygon
 
     def _make_ros_point_cloud(self):
@@ -165,6 +177,7 @@ class Obstacle:
         ros_point_cloud.header.frame_id = self.frame_id
         ros_point_cloud.header.stamp = rospy.Time(0)
         ros_point_cloud.points = []
+        ros_point_cloud.channels = [ChannelFloat32()]
         ros_point_cloud.channels[0].name = "obstacle_id"
         ros_point_cloud.channels[0].values = []
         for point in self.points_set:
@@ -175,7 +188,7 @@ class Obstacle:
             ros_point_cloud.channels[0].values.append(self.obstacle_id)
         return ros_point_cloud
 
-    def _make_ros_poses(self, polygon):
+    def _make_ros_pose(self, polygon):
         ros_pose = PoseStamped()
         ros_pose.header.seq = 1
         ros_pose.header.stamp = rospy.Time(0)
@@ -194,10 +207,10 @@ class Obstacle:
                                        (center.x, center.y),
                                        (center.x, center.y)]
 
-            beveled_polygon_sides_centroids = [(center.x - robot_radius, center.y),
-                                               (center.x, center.y + robot_radius),
-                                               (center.x + robot_radius, center.y),
-                                               (center.x, center.y - robot_radius)]
+            beveled_polygon_sides_centroids = [(center.x - self.robot_metadata.robot_radius, center.y),
+                                               (center.x, center.y + self.robot_metadata.robot_radius),
+                                               (center.x + self.robot_metadata.robot_radius, center.y),
+                                               (center.x, center.y - self.robot_metadata.robot_radius)]
 
         if type(convex_hull) is LineString:
             center = convex_hull.centroid
@@ -245,20 +258,20 @@ class Obstacle:
         return push_poses
 
     def _make_inflated_obstacle_grid(self, bb_top_left_corner, bb_bottom_right_corner, discretized_polygon, footprint, removeObstaclePoints = False):
-        inflation_width = len(footprint)
-        inflation_heigth = len(footprint[0])
+        inflation_width = len(footprint) / 2
+        inflation_heigth = len(footprint[0]) / 2
 
         matrixTopLeftX = ((bb_top_left_corner[0] - inflation_width)
-            if (bb_top_left_corner[0] - inflation_width) < 0 else 0)
+            if (bb_top_left_corner[0] - inflation_width) >= 0 else 0)
         matrixTopLeftY = ((bb_top_left_corner[1] - inflation_heigth)
-            if (bb_top_left_corner[1] - inflation_heigth) < 0 else 0)
+            if (bb_top_left_corner[1] - inflation_heigth) >= 0 else 0)
         matrixBottomRightX = ((bb_bottom_right_corner[0] + inflation_width)
-            if (bb_bottom_right_corner[0] + inflation_width) >= self.map_metadata.width else self.map_metadata.width)
-        matrixBottomRightY = ((bb_bottom_right_corner[0] + inflation_heigth)
-            if (bb_bottom_right_corner[0] + inflation_heigth) >= self.map_metadata.height else self.map_metadata.height)
+            if (bb_bottom_right_corner[0] + inflation_width) < self.map_metadata.width else self.map_metadata.width)
+        matrixBottomRightY = ((bb_bottom_right_corner[1] + inflation_heigth)
+            if (bb_bottom_right_corner[1] + inflation_heigth) < self.map_metadata.height else self.map_metadata.height)
 
-        width = matrixBottomRightX - matrixTopLeftX
-        height = matrixBottomRightY - matrixTopLeftY
+        width = matrixBottomRightX - matrixTopLeftX + 1
+        height = matrixBottomRightY - matrixTopLeftY + 1
 
         return {"top_left_corner": (matrixTopLeftX, matrixTopLeftY),
             "matrix": Utils._get_inflastamped_matrix(discretized_polygon,

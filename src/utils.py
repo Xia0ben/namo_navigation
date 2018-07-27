@@ -1,6 +1,7 @@
 import rospy
 import tf
 import math
+import numpy as np
 from geometry_msgs.msg import PoseStamped, Quaternion
 from nav_msgs.msg import Path
 
@@ -108,6 +109,32 @@ class Utils:
 
         return map_path
 
+
+    ##################### TODO MAKE USE OF THESE METHODS EVERYWHERE
+    @staticmethod
+    def real_to_map(realX, realY, resolution):
+        return int(realX / resolution), int(realY / resolution)
+
+    @staticmethod
+    def map_to_real(mapX, mapY, resolution):
+        return resolution * (float(mapX) + 0.5), resolution * (float(mapY) + 0.5)
+
+    @staticmethod
+    def real_coords_to_map_coords(real_coords_set, resolution):
+        map_coords_set = set()
+        for real_coords in real_coords_set:
+            map_coords_set.add(Utils.real_to_map(real_coords[0], real_coords[1], resolution))
+        return map_coords_set
+
+    @staticmethod
+    def map_coords_to_real_coords(map_coords_set, resolution):
+        real_coords_set = set()
+        for map_coords in map_coords_set:
+            real_coords_set.add(Utils.map_to_real(map_coords[0], map_coords[1], resolution))
+        return real_coords_set
+
+    ##################### ENDOFTODO MAKE USE OF THESE METHODS EVERYWHERE
+
     @staticmethod
     def ros_pose_from_map_coord(coordX, coordY, resolution, point_id, frame_id):
         new_pose = PoseStamped()
@@ -131,9 +158,9 @@ class Utils:
 
     @staticmethod
     def distance_between_ros_poses(init_pose, goal_pose):
-        return numpy.linalg.norm(
-            numpy.array([goal_pose.pose.position.x, goal_pose.pose.position.y]) -
-            numpy.array([init_pose.pose.position.x, init_pose.pose.position.y])
+        return np.linalg.norm(
+            np.array([goal_pose.pose.position.x, goal_pose.pose.position.y]) -
+            np.array([init_pose.pose.position.x, init_pose.pose.position.y])
         )
 
     @staticmethod
@@ -150,6 +177,11 @@ class Utils:
 
         matrix = np.zeros((width, height), dtype=int)
 
+        for point in points:
+            xInM = point[0] - offsetX
+            yInM = point[1] - offsetY
+            matrix[xInM][yInM] = Utils.ROS_COST_LETHAL
+
         fWidthLeft = len(footprint) / 2 if len(footprint) % 2 == 0 else (len(footprint) - 1) / 2
         fHeightLeft = len(footprint[0]) / 2 if len(footprint[0]) % 2 == 0 else (len(footprint[0]) - 1) / 2
         fWidthRight = len(footprint) / 2
@@ -162,12 +194,14 @@ class Utils:
 
             # Apply the footprint around the point
             xF, yF = 0, 0 # Current coordinates in footprint
-            for xM in range(xInM - fWidthLeft, xInM + fWidthRight):
-                for yM in range(yInM - fHeightLeft, yInM + fHeightRight):
-                    if _is_in_matrix(xM, yM, width, height) and footprint[xF][yF] > M[xM][yM]:
-                        M[xM][yM] = footprint[xF][yF]
+            for xM in range(xInM - fWidthLeft, xInM + fWidthRight + 1):
+                for yM in range(yInM - fHeightLeft, yInM + fHeightRight + 1):
+                    if Utils._is_in_matrix(xM, yM, width, height) and footprint[xF][yF] > matrix[xM][yM]:
+                        matrix[xM][yM] = footprint[xF][yF]
                     yF = yF + 1
                 xF = xF + 1
+                yF = 0
+            xF = 0
 
         # Remove points that correspond to the obstacle itself if asked for it
         # Do not combine with above loop : there would be overwriting
