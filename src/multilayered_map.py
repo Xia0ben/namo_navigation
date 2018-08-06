@@ -8,19 +8,6 @@ from obstacle import Obstacle
 from utils import Utils
 
 class MultilayeredMap:
-    LETHAL_COST_ROS = 254
-    FREESPACE_COST_ROS = 0
-    NEWPOINT_VALUE = -1
-
-    # DBSCAN_EPSILON = 10
-    # DBSCAN_MIN_SAMPLES = 1
-    # DBSCAN_ALGORITHM = 'auto'
-    # DBSCAN_METRIC = 'euclidean'
-    # DBSCAN_METRIC_PARAMS = None
-    # DBSCAN_LEAF_SIZE = 30
-    # DBSCAN_P = None
-    # N_JOBS = 1
-
     PSEUDO_INFLATION_FOOTPRINT = [[Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
                                   [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
                                   [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL]]
@@ -33,7 +20,8 @@ class MultilayeredMap:
         # as defined in the map given to the map server
         self.static_occ_grid = np.array(rosMap.data).reshape(
             (self.info.height, self.info.width))
-        self.static_occ_grid[self.static_occ_grid == 100] = 254 # WORKAROUND FOR IMPORT WITH RAW VALUES THAT DOES NOT WORK AS INTENDED
+        self.static_occ_grid[self.static_occ_grid == 100] = Utils.ROS_COST_LETHAL
+        self.static_occ_grid[self.static_occ_grid == 0] = Utils.ROS_COST_FREE_SPACE
         self.static_obstacles_positions = self._get_static_obstacles_positions()
         # self.pseudo_inflated_static_occ_grid = self._get_pseudo_inflated_static_occ_grid(MultiLayeredMap.PSEUDO_INFLATION_FOOTPRINT)
         self.inflated_static_occ_grid = self._get_inflated_static_occ_grid(robot_metadata.footprint)
@@ -48,11 +36,24 @@ class MultilayeredMap:
 
     def manually_add_obstacle(self, obstacle):
         self.obstacles.update({obstacle.obstacle_id: obstacle})
+        self.compute_merged_occ_grid()
 
     def compute_merged_occ_grid(self):
-        # FIXME
-        # Add all obstacles to the
-        pass
+        self.merged_occ_grid = copy.deepcopy(self.inflated_static_occ_grid)
+        for obstacle_id, obstacle in self.obstacles.items():
+            top_left_corner = obstacle.robot_inflated_obstacle["top_left_corner"]
+            bottom_right_corner = obstacle.robot_inflated_obstacle["bottom_right_corner"]
+            obstacle_matrix = obstacle.robot_inflated_obstacle["matrix"]
+
+            xO, yO = 0, 0
+            for x in range(top_left_corner[0], bottom_right_corner[0]):
+                for y in range(top_left_corner[1], bottom_right_corner[1]):
+                    if obstacle_matrix[xO][yO] > self.merged_occ_grid[x][y]:
+                        self.merged_occ_grid[x][y] = obstacle_matrix[xO][yO]
+                    yO = yO + 1
+                xO = xO + 1
+                yO = 0
+            xO = 0
 
     #@staticmethod
     def is_in_fov(point, pose_np, radius):
@@ -167,6 +168,8 @@ class MultilayeredMap:
         for obstacle_id, point_set in to_remove_point_dict.items():
             for point in point_set:
                 self.obstacles[obstacle_id].remove_point(point)
+
+        self.compute_merged_occ_grid()
 
     def has_free_space_been_created(self):
         # FIXME return true if we moved an object (or if an object moved by

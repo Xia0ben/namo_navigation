@@ -1,6 +1,7 @@
 import rospy
 from multilayered_map import MultilayeredMap
 from geometry_msgs.msg import PoseStamped, Twist
+from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import PointCloud
 from utils import Utils
 import math
@@ -22,7 +23,7 @@ class BasicSimulator:
         self.init_robot_2d_position = [0.0, 0.0] # rospy.get_param('~init_robot_position')
         self.init_robot_yaw = 0.0 # rospy.get_param('~init_robot_yaw')
         self.init_robot_twist = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] # rospy.get_param('~init_robot_twist')
-        self.robot_polygonal_footprint = Point(self.init_robot_2d_position).buffer(robot_diameter / 2.0)
+        self.robot_polygonal_footprint = Point(self.init_robot_2d_position).buffer(self.robot_diameter / 2.0)
         self.arbitrary_obstacles = {
             1: {(1.0, 1.0), (1.0, 2.0), (2.0, 2.0), (2.0, 1.0)}
         }
@@ -45,15 +46,15 @@ class BasicSimulator:
         self.simulation_robot_pose.pose.position.x = self.init_robot_2d_position[0]
         self.simulation_robot_pose.pose.position.y = self.init_robot_2d_position[1]
         self.simulation_robot_pose.pose.position.z = 0.0
-        self.simulation_robot_pose.pose.orientation = Utils.geom_quat_from_yaw(init_robot_yaw)
+        self.simulation_robot_pose.pose.orientation = Utils.geom_quat_from_yaw(self.init_robot_yaw)
         
         self.simulation_robot_twist = Twist()
-        self.simulation_robot_twist.linear.x = init_robot_twist[0]
-        self.simulation_robot_twist.linear.y = init_robot_twist[1]
-        self.simulation_robot_twist.linear.z = init_robot_twist[2]
-        self.simulation_robot_twist.angular.x = init_robot_twist[3]
-        self.simulation_robot_twist.angular.y = init_robot_twist[4]
-        self.simulation_robot_twist.angular.z = init_robot_twist[5]
+        self.simulation_robot_twist.linear.x = self.init_robot_twist[0]
+        self.simulation_robot_twist.linear.y = self.init_robot_twist[1]
+        self.simulation_robot_twist.linear.z = self.init_robot_twist[2]
+        self.simulation_robot_twist.angular.x = self.init_robot_twist[3]
+        self.simulation_robot_twist.angular.y = self.init_robot_twist[4]
+        self.simulation_robot_twist.angular.z = self.init_robot_twist[5]
         
         # World state
         self.sim_map = None
@@ -77,7 +78,7 @@ class BasicSimulator:
     
     def update(self, time_delta):
         # Get position and velocity
-        theta = Utils.yaw_from_geom_quat(init_robot_yaw)
+        theta = Utils.yaw_from_geom_quat(self.init_robot_yaw)
         x = self.simulation_robot_pose.pose.position.x
         y = self.simulation_robot_pose.pose.position.y
         v = self.simulation_robot_twist.linear.x
@@ -88,11 +89,11 @@ class BasicSimulator:
             new_x = x + -(v/w)*math.sin(theta) + (v/w)*math.sin(theta+w*time_delta)
             new_y = y -(v/w)*math.cos(theta) - (v/w)*math.cos(theta+w*time_delta)
         else:
-            new_x = x + v * time_delta * cos(theta)
-            new_y = y + v * time_delta * sin(theta)
+            new_x = x + v * time_delta * math.cos(theta)
+            new_y = y + v * time_delta * math.sin(theta)
         new_theta = theta + w * time_delta
         
-        new_robot_polygonal_footprint = Point(new_x, new_y).buffer(robot_diameter / 2.0)
+        new_robot_polygonal_footprint = Point(new_x, new_y).buffer(self.robot_diameter / 2.0)
         
         # FIXME If new position causes the robot to enter in contact with an obstacle,
         # check whether the obstacle is movable or not. If it is, move it in the

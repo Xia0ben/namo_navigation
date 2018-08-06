@@ -265,22 +265,23 @@ class Obstacle:
             if (bb_top_left_corner[0] - inflation_width) >= 0 else 0)
         matrixTopLeftY = ((bb_top_left_corner[1] - inflation_heigth)
             if (bb_top_left_corner[1] - inflation_heigth) >= 0 else 0)
-        matrixBottomRightX = ((bb_bottom_right_corner[0] + inflation_width)
-            if (bb_bottom_right_corner[0] + inflation_width) < self.map_metadata.width else self.map_metadata.width)
-        matrixBottomRightY = ((bb_bottom_right_corner[1] + inflation_heigth)
-            if (bb_bottom_right_corner[1] + inflation_heigth) < self.map_metadata.height else self.map_metadata.height)
+        matrixBottomRightX = ((bb_bottom_right_corner[0] + inflation_width + 1)
+            if (bb_bottom_right_corner[0] + inflation_width + 1) < self.map_metadata.width else self.map_metadata.width)
+        matrixBottomRightY = ((bb_bottom_right_corner[1] + inflation_heigth + 1)
+            if (bb_bottom_right_corner[1] + inflation_heigth + 1) < self.map_metadata.height else self.map_metadata.height)
 
-        width = matrixBottomRightX - matrixTopLeftX + 1
-        height = matrixBottomRightY - matrixTopLeftY + 1
+        width = matrixBottomRightX - matrixTopLeftX
+        height = matrixBottomRightY - matrixTopLeftY
 
         return {"top_left_corner": (matrixTopLeftX, matrixTopLeftY),
-            "matrix": Utils._get_inflastamped_matrix(discretized_polygon,
-                                                     footprint,
-                                                     width,
-                                                     height,
-                                                     matrixTopLeftX,
-                                                     matrixTopLeftY,
-                                                     removeObstaclePoints)}
+                "bottom_right_corner": (matrixBottomRightX, matrixBottomRightY),
+                "matrix": Utils._get_inflastamped_matrix(discretized_polygon,
+                                                         footprint,
+                                                         width,
+                                                         height,
+                                                         matrixTopLeftX,
+                                                         matrixTopLeftY,
+                                                         removeObstaclePoints)}
 
     def __hash__(self):
         # Hash depends only on the unique and immutable id of the obstacle

@@ -285,7 +285,7 @@ class NavManager:
 
 
     def compare(self, blocking_areas_before, blocking_areas_after):
-        comparison_matrix = copy.deepcopy(blocking_areas_after)
+        comparison_matrix = copy.deepcopy(blocking_areas_before)
         del_num = set()
 
         for x in range(len(comparison_matrix)):

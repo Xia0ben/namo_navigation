@@ -8,9 +8,16 @@ from nav_msgs.msg import Path
 class Utils:
     TF_LISTENER = tf.TransformListener()
 
-    ROS_COST_LETHAL = 254
-    ROS_COST_INSCRIBED = 253
-    ROS_COST_POSSIBLY_CIRCUMSCRIBED = 128
+    # UINT_TO_INT = 128
+    # ROS_COST_LETHAL = 254 - UINT_TO_INT
+    # ROS_COST_INSCRIBED = 253 - UINT_TO_INT
+    # ROS_COST_POSSIBLY_CIRCUMSCRIBED = 128 - UINT_TO_INT
+    # ROS_COST_POSSIBLY_NONFREE = 1 - UINT_TO_INT
+    # ROS_COST_FREE_SPACE = 0 - UINT_TO_INT
+
+    ROS_COST_LETHAL = 100
+    ROS_COST_INSCRIBED = 99
+    ROS_COST_POSSIBLY_CIRCUMSCRIBED = 51
     ROS_COST_POSSIBLY_NONFREE = 1
     ROS_COST_FREE_SPACE = 0
 
@@ -175,7 +182,7 @@ class Utils:
         # add a column and/or line in the middle by copying one of the
         # columns/lines of the middle of the footprint
 
-        matrix = np.zeros((width, height), dtype=int)
+        matrix = np.full((width, height), Utils.ROS_COST_FREE_SPACE, dtype=int)
 
         for point in points:
             xInM = point[0] - offsetX

@@ -21,7 +21,7 @@ class RobotMetaData:
         footprint_length = int(round(diameter / resolution))
         footprint_length = footprint_length if footprint_length % 2 != 0 else footprint_length + 1
 
-        footprint = np.zeros((footprint_length, footprint_length), dtype=int)
+        footprint = np.full((footprint_length, footprint_length), Utils.ROS_COST_FREE_SPACE, dtype=int)
 
         circle_center = float(footprint_length) / 2.0
 
