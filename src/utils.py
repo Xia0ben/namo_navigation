@@ -2,8 +2,8 @@ import rospy
 import tf
 import math
 import numpy as np
-from geometry_msgs.msg import PoseStamped, Quaternion
-from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped, Quaternion, Polygon as RosPolygon, Point32, Point, PolygonStamped
+from nav_msgs.msg import Path as RosPath, GridCells
 
 class Utils:
     TF_LISTENER = tf.TransformListener()
@@ -83,8 +83,17 @@ class Utils:
         return geom_quat
 
     @staticmethod
+    def ros_path_from_poses(start_pose, end_pose, frame_id):
+        ros_path = RosPath()
+        ros_path.header.seq = 1
+        ros_path.header.stamp = rospy.Time(0)
+        ros_path.header.frame_id = frame_id
+        ros_path.poses = [start_pose, end_pose]
+        return ros_path
+
+    @staticmethod
     def ros_path_from_map_path(map_path, start_pose, end_pose, resolution, frame_id):
-        ros_path = Path()
+        ros_path = RosPath()
         ros_path.header.seq = 1
         ros_path.header.stamp = rospy.Time(0)
         ros_path.header.frame_id = frame_id
@@ -164,11 +173,10 @@ class Utils:
         return coordX, coordY
 
     @staticmethod
-    def distance_between_ros_poses(init_pose, goal_pose):
-        return np.linalg.norm(
-            np.array([goal_pose.pose.position.x, goal_pose.pose.position.y]) -
-            np.array([init_pose.pose.position.x, init_pose.pose.position.y])
-        )
+    def euclidean_distance_ros_poses(init_pose, goal_pose):
+        return Utils.euclidean_distance(
+            (init_pose.pose.position.x, init_pose.pose.position.y),
+            (goal_pose.pose.position.x, goal_pose.pose.position.y))
 
     @staticmethod
     def euclidean_distance(point_tuple_a, point_tuple_b):
@@ -227,3 +235,90 @@ class Utils:
     @staticmethod
     def get_corners_float_coords(int_coord_x, int_coord_y):
         return [(float(int_coord_x), float(int_coord_y)), (float(int_coord_x) + 1.0, float(int_coord_y)), (float(int_coord_x) + 1.0, float(int_coord_y) + 1.0), (float(int_coord_x), float(int_coord_y) + 1.0)]
+
+    @staticmethod
+    def get_corners_world_coords(int_coord_x, int_coord_y, resolution):
+        float_coord_x = resolution * float(int_coord_x)
+        float_coord_y = resolution * float(int_coord_y)
+        return {(float_coord_x, float_coord_y),
+                (float_coord_x + resolution, float_coord_y),
+                (float_coord_x + resolution, float_coord_y + resolution),
+                (float_coord_x, float_coord_y + resolution)}
+
+    @staticmethod
+    def debug_publish_path(path, topic):
+        Utils.publish_path(path, topic)
+
+    @staticmethod
+    def publish_plan(plan):
+        if len(plan.components) == 1:
+            p_opt_pub = rospy.Publisher("/simulated/p_opt_no", RosPath, queue_size=1)
+            Utils.publish_once(p_opt_pub, plan.components[0].path)
+        elif len(plan.components) == 3:
+            c1_pub = rospy.Publisher("/simulated/p_opt_c1", RosPath, queue_size=1)
+            c2_pub = rospy.Publisher("/simulated/p_opt_c2", RosPath, queue_size=1)
+            c3_pub = rospy.Publisher("/simulated/p_opt_c3", RosPath, queue_size=1)
+            Utils.publish_once(c1_pub, plan.components[0].path)
+            Utils.publish_once(c2_pub, plan.components[1].path)
+            Utils.publish_once(c3_pub, plan.components[2].path)
+
+    @staticmethod
+    def publish_path(path, topic):
+        pub = rospy.Publisher(topic, RosPath, queue_size=1)
+        Utils.publish_once(pub, path.path)
+
+    @staticmethod
+    def debug_publish_real_coords(real_coords, topic):
+        grid_cells = GridCells()
+        grid_cells.header.seq = 1
+        grid_cells.header.stamp = rospy.Time(0)
+        grid_cells.header.frame_id = "/map"
+        grid_cells.cell_width = 0.01
+        grid_cells.cell_height = grid_cells.cell_width
+        for real_coord in real_coords:
+            point = Point()
+            point.x = real_coord[0]
+            point.y = real_coord[1]
+            grid_cells.cells.append(point)
+        pub = rospy.Publisher(topic, GridCells, queue_size=1)
+        Utils.publish_once(pub, grid_cells)
+
+    @staticmethod
+    def debug_publish_map_coords(map_coords, topic):
+        grid_cells = GridCells()
+        grid_cells.header.seq = 1
+        grid_cells.header.stamp = rospy.Time(0)
+        grid_cells.header.frame_id = "/map"
+        grid_cells.cell_width = 0.05
+        grid_cells.cell_height = grid_cells.cell_width
+        real_coords = Utils.map_coords_to_real_coords(map_coords, grid_cells.cell_width)
+        for real_coord in real_coords:
+            point = Point()
+            point.x = real_coord[0]
+            point.y = real_coord[1]
+            grid_cells.cells.append(point)
+        pub = rospy.Publisher(topic, GridCells, queue_size=1)
+        Utils.publish_once(pub, grid_cells)
+
+    @staticmethod
+    def debug_publish_shapely_as_ros_polygon(shapely_polygon, topic):
+        ros_polygon = Utils.convert_shapely_as_ros_polygon(shapely_polygon)
+        pub = rospy.Publisher(topic, PolygonStamped, queue_size=1)
+        Utils.publish_once(pub, ros_polygon)
+
+    @staticmethod
+    def convert_shapely_as_ros_polygon(shapely_polygon):
+        polygon_stamped = PolygonStamped()
+        polygon_stamped.header.seq = 1
+        polygon_stamped.header.stamp = rospy.Time(0)
+        polygon_stamped.header.frame_id = "/map"
+        ros_polygon = RosPolygon()
+        coords = list(shapely_polygon.exterior.coords)
+        for coord in coords:
+            point = Point32()
+            point.x = coord[0]
+            point.y = coord[1]
+            ros_polygon.points.append(point)
+        polygon_stamped.polygon = ros_polygon
+        return polygon_stamped
+

@@ -9,8 +9,8 @@ import rospy
 import copy
 import math
 
+
 class Obstacle:
-    idCounter = 1
 
     def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable = True, axis_rect_hypothesis = True):
         # Copy obstacle representations from parameters
@@ -51,7 +51,7 @@ class Obstacle:
 
     # We assume that the robot goes in a straight line when moving the object,
     # which allows us to use a convex hull to determine the safe swept area,
-    # rather than a concave hull which is computationnaly more challenging.
+    # rather than a concave hull which is computationaly more challenging.
     # See : http://blog.thehumangeo.com/2014/05/12/drawing-boundaries-in-python/
     def _get_manipulation_polygon(self, translation_vector):
         current_polygon = copy.deepcopy(self.polygon)
@@ -78,23 +78,37 @@ class Obstacle:
                           int(coords[1][0] / self.map_metadata.resolution),  # x2
                           int(coords[1][1] / self.map_metadata.resolution))) # y2
         else:
+            Utils.debug_publish_shapely_as_ros_polygon(manipulation_polygon.envelope, "/simulated/debug_polygon")
             x, y = manipulation_polygon.envelope.exterior.xy
             bb_top_left_corner = (int(min(x) / self.map_metadata.resolution), int(min(y) / self.map_metadata.resolution))
             bb_bottom_right_corner = (int(max(x) / self.map_metadata.resolution), int(max(y) / self.map_metadata.resolution))
+            Utils.debug_publish_map_coords({bb_top_left_corner, bb_bottom_right_corner}, "/simulated/debug_map_coords")
 
             # Check if manipulation causes to be out of map bounds
             # If yes, return empty set
-            if (not Utils._is_in_matrix(bb_top_left_corner[0][0], bb_top_left_corner[0][1], self.map_metadata.width, self.map_metadata.height) or
-                not Utils._is_in_matrix(bb_bottom_right_corner[1][0], bb_bottom_right_corner[1][1], self.map_metadata.width, self.map_metadata.height)):
+            if (not Utils._is_in_matrix(bb_top_left_corner[0], bb_top_left_corner[1], self.map_metadata.width, self.map_metadata.height) or
+                not Utils._is_in_matrix(bb_bottom_right_corner[0], bb_bottom_right_corner[1], self.map_metadata.width, self.map_metadata.height)):
                 return set()
 
-            for i in range(bb_top_left_corner[0], bb_bottom_right_corner[0]):
-                for j in range(bb_top_left_corner[1], bb_bottom_right_corner[1]):
-                    for corner in Utils.get_corners_float_coords(i, j):
+            for i in range(bb_top_left_corner[0], bb_bottom_right_corner[0] + 1):
+                for j in range(bb_top_left_corner[1], bb_bottom_right_corner[1] + 1):
+                    for corner in Utils.get_corners_world_coords(i, j, self.map_metadata.resolution):
                         if manipulation_polygon.contains(Point(corner)):
                             manipulation_area_map_points.add((i, j))
 
+        Utils.debug_publish_map_coords(manipulation_area_map_points, "/simulated/debug_map_coords")
+
         return manipulation_area_map_points
+
+    def move(self, translation):
+        points_set_after = set()
+        for point in self.points_set:
+            points_set_after.add((point[0] + translation[0], point[1] + translation[1]))
+
+        self.points_set = points_set_after
+
+        # Update all other alternative representations
+        self._update_alternate_representations()
 
     def update(self, to_add_points_set, to_remove_points_set):
         # Update points_set
@@ -146,7 +160,7 @@ class Obstacle:
         # robot_radius distance from the middle point of each side of the
         # obstacle polygon representation, and directed toward the same middle
         # point.
-        self.push_poses = self._make_push_poses(self.convex_hull, self.polygon)
+        self.push_poses = self._make_push_poses(self.convex_hull, self.polygon, self.map_metadata.resolution)
 
         # Compute obstacle matrix and inflated obstacle
         self.obstacle_matrix = self._make_inflated_obstacle_grid(self.bb_top_left_corner, self.bb_bottom_right_corner, self.discretized_polygon,  self.robot_metadata.footprint_2X, removeObstaclePoints = True)
@@ -158,7 +172,8 @@ class Obstacle:
         if type(convex_hull) is Point:
             discretized_polygon = {(int(convex_hull.x / resolution),
                 int(convex_hull.y / resolution))}
-        if type(convex_hull) is LineString:
+            return discretized_polygon
+        elif type(convex_hull) is LineString:
             polygon_vertices = list(convex_hull.coords)
         else:
             polygon_vertices = list(polygon.exterior.coords)
@@ -197,8 +212,12 @@ class Obstacle:
         ros_pose.pose.position.y = polygon.centroid.y
         return ros_pose
 
-    def _make_push_poses(self, convex_hull, polygon):
+    def _make_push_poses(self, convex_hull, polygon, resolution):
+        # FIXME Add verification that the push poses is not occupied in the merged occupation grid
+
         push_poses = []
+
+        distance_from_border = resolution + self.robot_metadata.radius
 
         if type(convex_hull) is Point:
             center = convex_hull
@@ -207,31 +226,31 @@ class Obstacle:
                                        (center.x, center.y),
                                        (center.x, center.y)]
 
-            beveled_polygon_sides_centroids = [(center.x - self.robot_metadata.robot_radius, center.y),
-                                               (center.x, center.y + self.robot_metadata.robot_radius),
-                                               (center.x + self.robot_metadata.robot_radius, center.y),
-                                               (center.x, center.y - self.robot_metadata.robot_radius)]
-
-        if type(convex_hull) is LineString:
+            beveled_polygon_sides_centroids = [(center.x - distance_from_border, center.y),
+                                               (center.x, center.y + distance_from_border),
+                                               (center.x + distance_from_border, center.y),
+                                               (center.x, center.y - distance_from_border)]
+        elif type(convex_hull) is LineString:
             center = convex_hull.centroid
             polygon_sides_centroids = [(center.x, center.y),
-                                       (center.x, center.y),]
+                                       (center.x, center.y)]
 
-            beveled_polygon_sides_centroids = [(center.x - self.robot_metadata.radius_div_by_sqrt_2,
-                center.y - self.robot_metadata.radius_div_by_sqrt_2),
-                (center.x + self.robot_metadata.radius_div_by_sqrt_2,
-                center.y + self.robot_metadata.radius_div_by_sqrt_2),]
+            beveled_polygon = convex_hull.buffer(distance_from_border, join_style = 3, cap_style = 2)
 
+            beveled_polygon_sides_centroids = []
+            for i in range(1, len(beveled_polygon.exterior.coords) - 1, 2):
+                current_side = LineString([beveled_polygon.exterior.coords[i], beveled_polygon.exterior.coords[i+1]])
+                beveled_polygon_sides_centroids.append((current_side.centroid.x, current_side.centroid.y))
         else:
-            beveled_polygon = polygon.buffer(self.robot_metadata.radius, join_style = 3, cap_style = 3)
+            beveled_polygon = polygon.buffer(distance_from_border, join_style = 3, cap_style = 3)
 
             polygon_sides_centroids = []
             for i in range(len(polygon.exterior.coords) - 1):
                 current_side = LineString([polygon.exterior.coords[i], polygon.exterior.coords[i+1]])
-                polygon_sides_centroids.append((current_side.centroid.x, current_side.centroid.y))
+                polygon_sides_centroids = [(current_side.centroid.x, current_side.centroid.y)] + polygon_sides_centroids
 
             beveled_polygon_sides_centroids = []
-            for i in range(1, len(beveled_polygon.exterior.coords) - 1, 2):
+            for i in range(0, len(beveled_polygon.exterior.coords) - 1, 2):
                 current_side = LineString([beveled_polygon.exterior.coords[i], beveled_polygon.exterior.coords[i+1]])
                 beveled_polygon_sides_centroids.append((current_side.centroid.x, current_side.centroid.y))
 
@@ -246,7 +265,7 @@ class Obstacle:
             observation_direction = (p_side_centroid[0] - b_side_centroid[0],
                                      p_side_centroid[1] - b_side_centroid[1])
 
-            if observation_direction < 0:
+            if observation_direction[1] < 0:
                 yaw = 2 * math.pi - math.acos(observation_direction[0]/math.sqrt(observation_direction[0] ** 2 + observation_direction[1] ** 2))
             else:
                 yaw = math.acos(observation_direction[0]/math.sqrt(observation_direction[0] ** 2 + observation_direction[1] ** 2))
@@ -285,4 +304,4 @@ class Obstacle:
 
     def __hash__(self):
         # Hash depends only on the unique and immutable id of the obstacle
-        return self.id
+        return self.obstacle_id

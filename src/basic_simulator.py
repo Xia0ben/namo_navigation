@@ -73,56 +73,58 @@ class BasicSimulator:
         if self.static_map is None:
             self.static_map = new_map
             
-    def set_simulation_robot_twist_callback(self, twist):
-        self.simulation_robot_twist = twist
+    # def set_simulation_robot_twist_callback(self, twist):
+    #     self.simulation_robot_twist = twist
     
-    def update(self, time_delta):
-        # Get position and velocity
-        theta = Utils.yaw_from_geom_quat(self.init_robot_yaw)
-        x = self.simulation_robot_pose.pose.position.x
-        y = self.simulation_robot_pose.pose.position.y
-        v = self.simulation_robot_twist.linear.x
-        w = self.simulation_robot_twist.angular.z
-        
-        # Compute new values
-        if w != 0:
-            new_x = x + -(v/w)*math.sin(theta) + (v/w)*math.sin(theta+w*time_delta)
-            new_y = y -(v/w)*math.cos(theta) - (v/w)*math.cos(theta+w*time_delta)
-        else:
-            new_x = x + v * time_delta * math.cos(theta)
-            new_y = y + v * time_delta * math.sin(theta)
-        new_theta = theta + w * time_delta
-        
-        new_robot_polygonal_footprint = Point(new_x, new_y).buffer(self.robot_diameter / 2.0)
-        
-        # FIXME If new position causes the robot to enter in contact with an obstacle,
-        # check whether the obstacle is movable or not. If it is, move it in the
-        # right direction so that the points are not in collision anymore
-        
-        
-        # FIXME Update robot pose according to computed values and collision detection
-        self.simulation_robot_pose.header.seq = self.simulation_robot_pose.header.seq + 1
-        self.simulation_robot_pose.header.stamp = rospy.Time(0)
-        self.simulation_robot_pose.pose.position.x = new_x
-        self.simulation_robot_pose.pose.position.y = new_y
-        self.simulation_robot_pose.pose.orientation = Utils.geom_quat_from_yaw(new_theta)
-        
-        # Update fov pointcloud according to what the robot should see in the
-        # new pose
-        self.simulation_fov_pointcloud = self.sim_map.get_point_cloud_in_fov(self.simulation_robot_pose)
-        
-        # CONCLUSION : Publish pose and point cloud
-        Utils.publish_once(self.simulated_pose_pub, self.simulation_robot_pose)
-        Utils.publish_once(self.simulated_fov_pointcloud_pub, self.simulation_fov_pointcloud)
+    # def update(self, time_delta):
+    #     # Get position and velocity
+    #     theta = Utils.yaw_from_geom_quat(self.init_robot_yaw)
+    #     x = self.simulation_robot_pose.pose.position.x
+    #     y = self.simulation_robot_pose.pose.position.y
+    #     v = self.simulation_robot_twist.linear.x
+    #     w = self.simulation_robot_twist.angular.z
+    #
+    #     # Compute new values
+    #     if w != 0:
+    #         new_x = x + -(v/w)*math.sin(theta) + (v/w)*math.sin(theta+w*time_delta)
+    #         new_y = y -(v/w)*math.cos(theta) - (v/w)*math.cos(theta+w*time_delta)
+    #     else:
+    #         new_x = x + v * time_delta * math.cos(theta)
+    #         new_y = y + v * time_delta * math.sin(theta)
+    #     new_theta = theta + w * time_delta
+    #
+    #     new_robot_polygonal_footprint = Point(new_x, new_y).buffer(self.robot_diameter / 2.0)
+    #
+    #     # FIXME If new position causes the robot to enter in contact with an obstacle,
+    #     # check whether the obstacle is movable or not. If it is, move it in the
+    #     # right direction so that the points are not in collision anymore
+    #
+    #
+    #     # FIXME Update robot pose according to computed values AND collision detection
+    #     self.simulation_robot_pose.header.seq = self.simulation_robot_pose.header.seq + 1
+    #     self.simulation_robot_pose.header.stamp = rospy.Time(0)
+    #     self.simulation_robot_pose.pose.position.x = new_x
+    #     self.simulation_robot_pose.pose.position.y = new_y
+    #     self.simulation_robot_pose.pose.orientation = Utils.geom_quat_from_yaw(new_theta)
+    #
+    #     # Update fov pointcloud according to what the robot should see in the
+    #     # new pose
+    #     self.simulation_fov_pointcloud = self.sim_map.get_point_cloud_in_fov(self.simulation_robot_pose)
+    #
+    #     # CONCLUSION : Publish pose and point cloud
+    #     Utils.publish_once(self.simulated_pose_pub, self.simulation_robot_pose)
+    #     Utils.publish_once(self.simulated_fov_pointcloud_pub, self.simulation_fov_pointcloud)
         
 if __name__ == "__main__":
     rospy.init_node('basic_simulator', log_level=rospy.INFO)
     basic_simulator = BasicSimulator()
     
-    frequency = 60.0 # [Hz]
-    time_delta = 1.0 / frequency # [s]
-    rate = rospy.Rate(frequency)
-    
-    while not rospy.is_shutdown():
-        basic_simulator.update(time_delta)
-        rate.sleep()
+    # frequency = 60.0 # [Hz]
+    # time_delta = 1.0 / frequency # [s]
+    # rate = rospy.Rate(frequency)
+    #
+    # while not rospy.is_shutdown():
+    #     basic_simulator.update(time_delta)
+    #     rate.sleep()
+
+    rospy.spin()

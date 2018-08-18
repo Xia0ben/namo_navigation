@@ -169,7 +169,7 @@ class LocalPlanner(object):
             local_target_direction = np.array([current_subgoal_local.pose.position.x, current_subgoal_local.pose.position.y])
             local_target_direction_norm = np.linalg.norm(local_target_direction)
 
-            if local_target_direction < 0:
+            if local_target_direction[1] < 0:
                 rospy.loginfo("Complement acos because we are outside of range 0 to 180 deg.")
                 target_local_yaw = 2 * math.pi - math.acos(np.dot(local_target_direction, LocalPlanner.UNIT_VECTOR) /
                     local_target_direction_norm)

@@ -15,7 +15,7 @@ And augmented to support:
 - Non-binary occupation grids
 - Manhattan distance
 - Zig-zag suppression when using only N, S, E and W directions
-
+plan_for_obstacle
 TODO : PARAMETERIZE DIZ SHIT AND MOVE CONSTANTS OUT OF THE WAY
 
 By:
@@ -33,22 +33,13 @@ class GlobalPlanner:
     def __init__(self):
         pass
 
-    def make_plan(self, occupancy_grid, start_pose, end_pose):
-        # Convert input format to usable format for astar algorithm
-        map_2d = numpy.array(occupancy_grid.data).reshape(
-            (occupancy_grid.info.height, occupancy_grid.info.width))
+    def make_plan(self, occupancy_grid, start_pose, end_pose, resolution, frame_id):
+        start_grid_coords = Utils.map_coord_from_ros_pose(start_pose, resolution)
 
-        resolution = occupancy_grid.info.resolution
-        frame_id = occupancy_grid.header.frame_id
-
-        start_grid_coords = (int(start_pose.pose.position.x / resolution),
-                       int(start_pose.pose.position.y / resolution))
-
-        end_grid_coords = (int(end_pose.pose.position.x / resolution),
-                     int(end_pose.pose.position.y / resolution))
+        end_grid_coords = Utils.map_coord_from_ros_pose(end_pose, resolution)
 
         # Execute A*
-        astar_path = self.astar(map_2d, start_grid_coords, end_grid_coords, restrictTo4Neighbors = True)
+        astar_path = self.astar(occupancy_grid, start_grid_coords, end_grid_coords, restrictTo4Neighbors = False)
 
         # Convert A* output to standard ROS path
         ros_path = Utils.ros_path_from_map_path(astar_path, start_pose, end_pose, resolution, frame_id)
@@ -148,7 +139,7 @@ class GlobalPlanner:
                         if map_2d[neighbor[0]][neighbor[1]] >= Utils.ROS_COST_POSSIBLY_CIRCUMSCRIBED:
                             continue
                         # Consider but apply cost
-                    elif map_2d[neighbor[0]][neighbor[1]] >= Utils.ROS_COST_POSSIBLY_NONFREE:
+                        elif map_2d[neighbor[0]][neighbor[1]] >= Utils.ROS_COST_POSSIBLY_NONFREE:
                             extra_cost_ratio = (1.0 + float(map_2d[neighbor[0]][neighbor[1]]) /
                                                 float(Utils.ROS_COST_POSSIBLY_CIRCUMSCRIBED - 1))
                             cost_between_current_and_neighbor = self._dist_between(current, neighbor) * extra_cost_ratio
@@ -162,12 +153,13 @@ class GlobalPlanner:
                     # Neighbor is outside of map in x axis
                     continue
 
-                try:
-                    previous_direction = came_from_direction[current]
-                except KeyError:
-                    previous_direction = new_direction
-                rotation_cost = (1.5 if new_direction != previous_direction else 0.0)
-                cost_between_current_and_neighbor = cost_between_current_and_neighbor + rotation_cost
+                if restrictTo4Neighbors:
+                    try:
+                        previous_direction = came_from_direction[current]
+                    except KeyError:
+                        previous_direction = new_direction
+                    rotation_cost = (1.5 if new_direction != previous_direction else 0.0)
+                    cost_between_current_and_neighbor = cost_between_current_and_neighbor + rotation_cost
 
                 # The cost from start to a neighbor.
                 tentative_g_score = gscore[current] + cost_between_current_and_neighbor

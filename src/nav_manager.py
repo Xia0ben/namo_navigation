@@ -5,59 +5,49 @@
 
 import rospy
 from geometry_msgs.msg import Pose, PoseStamped
+from nav_msgs.msg import Path as RosPath
 from sortedcontainers import SortedDict
 import math
 import copy
 import tf
-import numpy
+import numpy as np
 
 # My own Classes
 from global_planner import GlobalPlanner
-from local_planner import LocalPlanner
 from map_manager import MapManager
+from path import Path
 from plan import Plan
 from utils import Utils
+from obstacle import Obstacle
 
 class NavManager:
 
-    def __init__(self):
-        # Get parameters
-        self.static_map_topic = "/map" # rospy.get_param('~map_topic')
-        self.robot_radius = "0.5" # [m] rospy.get_param('~robot_radius')
-        self.robot_fov_radius = "2.0" # [m] rospy.get_param('~robot_fov_radius')
-        self.map_frame = "/map" # rospy.get_param('~map_frame')
-        self.robot_frame = "/base_link" # rospy.get_param('~robot_frame')
-        self.move_cost = 1.0 # rospy.get_param('~move_cost')
-        self.push_cost = 1.0 # rospy.get_param('~push_cost')
-        self.xy_goal_tolerance = 0.10 # [m] rospy.get_param('~xy_goal_tolerance')
-        self.yaw_goal_tolerance = 0.03 # [rad] rospy.get_param('~yaw_goal_tolerance')
-        self.one_push_distance = 0.05 # [m] rospy.get_param('~push_distance')
-
-        # Declare common parameters
-        self.map_manager = MapManager(self.robot_radius, self.robot_fov_radius, self.map_frame, self.static_map_topic)
+    def __init__(self, map_manager):
+        self.MOVE_COST = 1.0
+        self.PUSH_COST = 1.0
+        self.ONE_PUSH_DISTANCE = 0.05
+        self.POSITION_TOLERANCE = 0.01 # [m]
+        self.ANGLE_TOLERANCE = 0.02 # [rad]
+        self.map_manager = map_manager
         self.global_planner = GlobalPlanner()
-        self.local_planner = LocalPlanner()
 
-    def _static_map_callback(self, new_map):
-        # For the moment, we don't want to manage new static maps for the
-        # node's life duration
-        if self.static_map is None:
-            self.static_map = new_map
+    def _get_safe_swept_area(self, obstacle, translation_vector, occupancy_grid):
+        # FIXME Don't just get manipulation area from obstacle polygon but also robot polygon, therefore, the method should move into MultilayeredMap class
+        manipulation_area_map_points = obstacle.get_manipulation_area_map_points(translation_vector)
 
-    def _is_goal_app_reached(self, current_pose, goal_pose):
-        distance_to_goal = Utils.distance_between_ros_poses(current_pose, goal_pose)
+        # If any manipulation area map point is occupied by an obstacle, then
+        # return None because the manipulation area is not a safe swept
+        # area. Otherwise, return the set of all safe swept map points.
+        for point in manipulation_area_map_points:
+            if point not in obstacle.discretized_polygon and occupancy_grid[point[0]][point[1]] == Utils.ROS_COST_LETHAL:
+                return None
+        return manipulation_area_map_points
 
-        if distance_to_goal < self.xy_goal_tolerance:
-            return True
-        return False
-
-        # TODO May be necessary to check if goal orientation has been reached too
-        # Use yaw_goal_tolerance param for that
-
-    def make_and_execute_plan(self, goal_robot_pose):
-        init_robot_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
-
-        self._optimized(init_robot_pose, goal_robot_pose)
+    def _apply_translation_to_pose(self, pose, translation_vector):
+        new_pose = copy.deepcopy(pose)
+        new_pose.pose.position.x = new_pose.pose.position.x + translation_vector[0]
+        new_pose.pose.position.y = new_pose.pose.position.y + translation_vector[1]
+        return new_pose
 
     def _get_cost_at_index(self, sorted_dict, index):
         try:
@@ -72,241 +62,234 @@ class NavManager:
         except IndexError as e:
             raise e
 
-    def _apply_translation_to_pose(self, pose, translation_vector):
-        new_pose = copy.deepcopy(pose)
-        new_pose.pose.x = new_pose.pose.x + translation_vector[0]
-        new_pose.pose.y = new_pose.pose.y + translation_vector[1]
-        return new_pose
+    def _is_same_pose(self, pose_a, pose_b):
+        pose_a_yaw = Utils.yaw_from_geom_quat(pose_a.pose.orientation)
+        pose_b_yaw = Utils.yaw_from_geom_quat(pose_b.pose.orientation)
 
-    def _get_safe_swept_area(self, obstacle, translation_vector, occupancy_grid):
-        manipulation_area_map_points = obstacle.get_manipulation_area_map_points()
+        if (np.isclose(pose_a_yaw, pose_b_yaw, atol = self.ANGLE_TOLERANCE) and
+                np.isclose(pose_a.pose.position.x, pose_b.pose.position.x, atol = self.POSITION_TOLERANCE) and
+                np.isclose(pose_a.pose.position.y, pose_b.pose.position.y, atol=self.POSITION_TOLERANCE)):
+            return True
+        # Else
+        return False
 
-        # If any manipulation area map point is occupied by an obstacle, then
-        # return an empty set because the manipulation area is not a safe swept
-        # area. Otherwise, return all the points as safe swept points.
-        for point in manipulation_area_map_points:
-            if occupancy_grid[point[0]][point[1]] == Utils.LETHAL_COST_ROS
-                return set()
-        return manipulation_area_map_points
+    def make_and_execute_plan(self, r_init, r_goal):
+        r_cur = r_init
+        is_manip_success = True
+        blocked_obstacles = set()
+        euclidean_cost_L, min_cost_L = SortedDict(), SortedDict()
 
-    def _execute_plan(self, optimal_plan):
-        self.local_planner.follow_path(optimal_plan)
+        map_cur = self.map_manager.get_init_map()
 
-    def _optimized(self, init_robot_pose, goal_robot_pose):
-        # Current state
-        current_robot_pose = init_robot_pose
-        navigation_map = self.map_manager.get_map_copy()
-        euclidean_cost_L = SortedDict()
-        min_cost_L = SortedDict()
-        optimal_plan = Plan.from_path(
-            self.global_planner.make_plan(navigation_map.merged_occ_grid, init_robot_pose, goal_robot_pose),
-            is_manipulation = False, resolution = navigation_map.resolution,
-            move_cost = self.move_cost, push_cost = self.push_cost)
-        is_moving = False
+        p_opt = [Plan([Path.from_path(
+            self.global_planner.make_plan(map_cur.merged_occ_grid, r_cur, r_goal, map_cur.info.resolution,
+                                          map_cur.frame_id), False, self.MOVE_COST)])]
 
-        # While check goal is reached
-        while not _is_goal_app_reached(current_robot_pose, goal_robot_pose):
-            # Original algorithm only checks for intersection with new obstacles
-            # But actually, if we use an occupancy grid to check whether the
-            # path crosses any obstacle, it doesn't change any functionnality
-            # and is not any more costly. Actually, it is less of a pain to
-            # implement.
-            if (optimal_plan.intersects_with_obstacles(navigation_map.merged_occ_grid)):
-                if navigation_map.has_free_space_been_created():
-                    min_cost_L.clear()
+        while self._is_same_pose(r_cur, r_goal):
+            map_cur = self.map_manager.get_map_copy()
 
-                for current_obstacle in navigation_map.obstacles.values():
-                    euclidean_cost_L[current_obstacle] = Utils.distance_between_ros_poses(
-                        goal_robot_pose, current_obstacle.ros_pose))
+            if self.map_manager.has_free_space_been_created: # FIXME update attribute in map by checking if obstacle have been modified in a way that they don't occupy the same points anymore
+                min_cost_l.clear()
 
-                optimal_plan = Plan.from_path(
-                    self.global_planner.make_plan(navigation_map.merged_occ_grid, current_robot_pose, goal_robot_pose),
-                    is_manipulation = False, resolution = navigation_map.resolution,
-                    move_cost = self.move_cost, push_cost = self.push_cost)
+            obstacles = map_cur.obstacles
 
-                index_EL, index_ML = 0, 0
+            is_push_pose_valid = True
+            is_obstacle_same = True
 
-                # Note: min_cost_L.peekitem(index_ML)[0] -> returns the obstacle
-                # Note: min_cost_L.peekitem(index_ML)[1] -> returns the estimated cost
-                # While we need to evaluate obstacles
-                while (min(self._get_cost_at_index(min_cost_L, index_ML), self._get_cost_at_index(euclidean_cost_L, index_EL)) < optimal_plan.cost):
-                    if (self._get_cost_at_index(min_cost_L, index_ML) < self._get_cost_at_index(euclidean_cost_L, index_EL)):
-                        current_plan = self._opt_evaluate_action(self._get_obstacle_at_index(min_cost_L, index_ML), optimal_plan, navigation_map, current_robot_pose, goal_robot_pose)
+            if p_opt.obstacle is not None:
+                # FIXME Implement this method to check if the two obstacles of same id still share the same points
+                is_obstacle_same = self._compare_obstacles(p_opt.o, obstacles[p_opt.obstacle.obstacle_id])
+                if not is_obstacle_same:
+                    p_opt.obstacle = obstacles[p_opt.obstacle.obstacle_id]
+                    p_opt.safe_swept_area = self._get_safe_swept_area(p_opt.obstacle, p_opt.translation_vector, map_cur.merged_occ_grid)
+                    # FIXME Implement this method by iterating over push poses and checking if position and orientation are the same (with some leeway ?)
+                    if not p_opt.obstacle.is_obstacle_push_pose(p_opt.push_pose):
+                        is_push_pose_valid = False
 
-                        if (current_plan is not None):
-                            min_cost_L[self._get_obstacle_at_index(min_cost_L, index_ML)] = current_plan.min_cost
-                            index_ML = index_ML + 1
+            # FIXME implement this method by checking for every pose in plan component c1 if none are occupied
+            # in the merged_occ_grid and if no obstacle map point is in the safe swept area when one exists (don't forget to
+            # not consider the map points of p_opt obstacle when iterating over obstacles), and if c3 is also ok in the same way as c1
+            is_plan_intersecting = map_cur.check_plan_intersection(p_opt)
 
-                            if (current_plan.cost < optimal_plan.cost):
-                                optimal_plan = current_plan
+            is_plan_valid = is_plan_intersecting and is_push_pose_valid and is_manip_success
 
-                    else
-                        try:
-                            # If the min_cost_L doesn't contain the obstacle, do except
-                            min_cost_L.index(self._get_obstacle_at_index(euclidean_cost_L, index_EL))
-                        except IndexError as exception:
-                            current_plan = self._opt_evaluate_action(self._get_obstacle_at_index(euclidean_cost_L,
-                                index_EL), optimal_plan, navigation_map, current_robot_pose, goal_robot_pose)
+            if not is_plan_valid:
+                p_opt = [Plan([Path.from_path(
+                    self.global_planner.make_plan(map_cur.merged_occ_grid, r_cur, r_goal, map_cur.info.resolution,
+                                                  map_cur.frame_id), False, self.MOVE_COST)])]
+                self.make_plan()
 
-                            if (current_plan is not None):
-                                min_cost_L[self._get_obstacle_at_index(euclidean_cost_L,
-                                    index_EL)] = current_plan.min_cost
-                                index_ML = index_ML + 1
+            # Stop condition if no plan is found
+            if not p_opt.cost >= float("inf"):
+                return False
 
-                                if (current_plan.cost < optimal_plan.cost):
-                                    optimal_plan = current_plan
+            is_manip_success = True
+            r_next = p_opt.get_next_step() # FIXME Implement this method by adding an iterator in Plan class that is incremented on call to this method
+            c_next = p_opt.get_next_step_component # FIXME Implement this attribute using another iterator that only follows the previous one
+            r_real = self.robot_goto(r_next) # FIXME Find a better way to implement this function
+            if c_next == 2 and not self._is_same_pose(r_real, r_next):
+                is_manip_success = False
+                blocked_obstacles.add(p_opt.obstacle)
+            r_cur = r_real
 
-                    index_EL = index_EL + 1
-                    # Endwhile we need to evaluate obstacles
+        # Endwhile
+        return True
 
-            if not is_moving:
-                self._execute_plan(optimal_plan)
-                is_moving = True
+    def make_plan(self, r_cur, r_goal , map_cur, obstacles, blocked_obstacles, p_opt, eu_cost_l, min_cost_l):
+        for obstacle in obstacles:
+            c3_est = float("inf")
+            for push_pose in obstacle.push_poses:
+                c3_est = min(c3_est, Utils.euclidean_distance_ros_poses(push_pose, r_goal))
+            eu_cost_l[obstacle] = c3_est
 
-            # R \gets$ Next step in $optimal_plan$ FIXME Have the robot advance one step in the plan
+        index_EL, index_ML = 0, 0
+        evaluated_obstacles = set()
 
-            current_robot_pose = Utils.get_current_pose(self.map_frame, self.robot_frame)
-            navigation_map = self.map_manager.get_map_copy()
+        while (min(self._get_cost_at_index(min_cost_l, index_ML), self._get_cost_at_index(eu_cost_l, index_EL)) < p_opt[0].cost):
+            if self._get_cost_at_index(min_cost_l, index_ML) < self._get_cost_at_index(eu_cost_l, index_EL):
+                evaluated_obstacle = self._get_obstacle_at_index(min_cost_l, index_ML)
+                if evaluated_obstacle not in evaluated_obstacles:
+                    p = self.plan_for_obstacle(evaluated_obstacle, p_opt, map_cur, r_cur, r_goal, blocked_obstacles)
+                    if p is not None:
+                        min_cost_l[evaluated_obstacle] = p.min_cost
+                    else:
+                        min_cost_l[evaluated_obstacle] = float("inf")
+                    evaluated_obstacles.add(evaluated_obstacle)
+                index_ML = index_ML + 1
+            else:
+                evaluated_obstacle = self._get_obstacle_at_index(eu_cost_l, index_EL)
+                if evaluated_obstacle not in evaluated_obstacles:
+                    try:
+                        # If the min_cost_L doesn't contain the obstacle, do except
+                        min_cost_l.index(evaluated_obstacle)
+                    except ValueError:
+                        p = self.plan_for_obstacle(
+                            evaluated_obstacle,
+                            p_opt, map_cur, r_cur, r_goal, blocked_obstacles)
+                        if p is not None:
+                            min_cost_l[evaluated_obstacle] = p.min_cost
+                        else:
+                            min_cost_l[evaluated_obstacle] = float("inf")
+                        evaluated_obstacles.add(evaluated_obstacle)
+                index_EL = index_EL + 1
 
-            # Endwhile check goal is reached
+        Utils.publish_plan(p_opt[0])
 
+    def plan_for_obstacle(self, obstacle, p_opt, map_cur, r_cur, r_goal, blocked_obstacles):
+        if obstacle in blocked_obstacles:
+            return None
 
-    def _opt_evaluate_action(self, obstacle, optimal_plan, navigation_map, current_robot_pose, goal_robot_pose):
-        paths_set = SortedDict()  # Use SortedDict rather than set or array for ease of use
-        blocking_areas = None
+        paths = SortedDict()
 
-        # For easier implementation, we iterate over push pose rather than
-        # an abstract concept of "direction"
-        for push_pose in obstacle.push_poses
+        for push_pose in obstacle.push_poses:
             push_pose_yaw = Utils.yaw_from_geom_quat(push_pose.pose.orientation)
             push_pose_unit_direction_vector = (math.cos(push_pose_yaw), math.sin(push_pose_yaw))
 
-            # Computation of c1 is done here (a contrario to the original algorithm)
-            # because it is in fact dependent of the push point (if the push point
-            # cannot be reached, we imediately know it)
-            c1 = Plan.from_path(
-                self.global_planner.make_plan(navigation_map.merged_occ_grid, current_robot_pose, push_pose),
-                is_manipulation = False, resolution = navigation_map.resolution,
-                move_cost = self.move_cost, push_cost = self.push_cost)
-            # If no path to the pushing point is found, then study next point
-            if (c1 is not None):
-                seq = 1
-                c3_est = Plan.from_poses(obstacle_sim_pose, goal_robot_pose,
-                            navigation_map.resolution, isManipulation = False,
-                            move_cost = self.move_cost, push_cost = self.push_cost)
-                cEst = c1.cost + c3_est.cost + seq * self.push_cost
-                translation_vector = (push_pose_unit_direction_vector[0] * one_push_distance * float(seq),
-                    push_pose_unit_direction_vector[1] * one_push_distance * float(seq))
+            c1 = Path.from_path(
+                self.global_planner.make_plan(map_cur.merged_occ_grid, r_cur, push_pose, map_cur.info.resolution, map_cur.frame_id), False, self.MOVE_COST)
+
+            Utils.debug_publish_path(c1, "/simulated/debug_c1")
+
+            # If c1 does not exist
+            if not c1.path.poses:
+                continue
+
+            seq = 1
+            translation_vector = (push_pose_unit_direction_vector[0] * self.ONE_PUSH_DISTANCE * float(seq),
+                                  push_pose_unit_direction_vector[1] * self.ONE_PUSH_DISTANCE * float(seq))
+            safe_swept_area = self._get_safe_swept_area(obstacle, translation_vector, map_cur.merged_occ_grid)
+            obstacle_sim_pose = self._apply_translation_to_pose(push_pose, translation_vector)
+            c3_est = Path.from_poses(obstacle_sim_pose, r_goal,
+                                     False, self.MOVE_COST, map_cur.info.resolution, map_cur.frame_id)
+            Utils.debug_publish_path(c3_est, "/simulated/debug_c3")
+            # TODO Make PUSH_COST an attribute of the object that is initialized to 1.0 until object is identified.
+            c_est = c1.cost + c3_est.cost + self.PUSH_COST * Utils.euclidean_distance(translation_vector, (0.0, 0.0))
+
+            while c_est <= p_opt[0].cost and safe_swept_area is not None:
+                c2 = Path.from_poses(push_pose, obstacle_sim_pose,
+                                     True, self.PUSH_COST, map_cur.info.resolution, map_cur.frame_id)
+                Utils.debug_publish_path(c2, "/simulated/debug_c2")
+                map_mod = copy.deepcopy(map_cur)
+                map_mod.manually_move_obstacle(obstacle.obstacle_id, translation_vector)
+                c3 = Path.from_path(
+                    self.global_planner.make_plan(map_mod.merged_occ_grid, obstacle_sim_pose, r_goal, map_cur.info.resolution, map_cur.frame_id), False, self.MOVE_COST)
+                Utils.debug_publish_path(c3, "/simulated/debug_c3")
+                # If c3 exists
+                if c3.path.poses:
+                    p = Plan([c1, c2, c3], obstacle, translation_vector, safe_swept_area)
+                    paths[p] = p.cost
+                    if p.cost < p_opt[0].cost:
+                        p_opt[0] = p
+
+                seq = seq + 1
+
+                translation_vector = (push_pose_unit_direction_vector[0] * self.ONE_PUSH_DISTANCE * float(seq),
+                                      push_pose_unit_direction_vector[1] * self.ONE_PUSH_DISTANCE * float(seq))
+                safe_swept_area = self._get_safe_swept_area(obstacle, translation_vector, map_cur.merged_occ_grid)
                 obstacle_sim_pose = self._apply_translation_to_pose(push_pose, translation_vector)
-                safe_swept_area = self._get_safe_swept_area(obstacle, translation_vector, navigation_map.merged_occ_grid)
-
-                # If safe_swept_area is empty, it is evaluated to False
-                while (bool(safe_swept_area) and cEst <= optimal_plan.cost):
-                    if (self._check_new_opening(navigation_map, obstacle, translation_vector, blocking_areas)):
-                        c2 = Plan.from_poses(push_pose, obstacle_sim_pose,
-                            navigation_map.resolution, isManipulation = False,
-                            move_cost = self.move_cost, push_cost = self.push_cost)
-                        c3 = Plan.from_path(self.global_planner.make_plan(navigation_map.merged_occ_grid, obstacle_sim_pose, goal_robot_pose),
-                            is_manipulation = False, resolution = navigation_map.resolution,
-                            move_cost = self.move_cost, push_cost = self.push_cost)
-                        # Costs are computed within the class
-                        current_plan = Plan.from_plans(c1, c2, c3)
-
-                    seq = seq + 1
-
-                    c3_est = Plan.from_poses(obstacle_sim_pose, goal_robot_pose,
-                                navigation_map.resolution, isManipulation = True,
-                                move_cost = self.move_cost, push_cost = self.push_cost)
-
-                    cEst = c1.cost + c3_est.cost + seq * self.push_cost
-                    translation_vector = (push_pose_unit_direction_vector[0] * one_push_distance * float(seq),
-                        push_pose_unit_direction_vector[1] * one_push_distance * float(seq))
-                    obstacle_sim_pose = self._apply_translation_to_pose(obstacle_sim_pose, translation_vector)
-                    safe_swept_area = self._get_safe_swept_area(obstacle, translation_vector, navigation_map.merged_occ_grid)
+                c3_est = Path.from_poses(obstacle_sim_pose, r_goal,
+                                         False, self.MOVE_COST, map_cur.info.resolution, map_cur.frame_id)
+                Utils.debug_publish_path(c3_est, "/simulated/debug_c3")
+                c_est = c1.cost + c3_est.cost + self.PUSH_COST * Utils.euclidean_distance(translation_vector, (0.0, 0.0))
 
         # Return path with lowest cost : the first in the ordered dictionnary
         # If there is none, return None
         try:
-            return paths_set.peekitem(0)
+            return paths.peekitem(0)[0]
         except IndexError:
             return None
 
-    def _check_new_opening(self, navigation_map, obstacle, translation_vector, blocking_areas):
-        obstacle_matrix = obstacle.obstacle_matrix["matrix"]
-        x_offset_before = obstacle.obstacle_matrix["top_left_corner"][0]
-        y_offset_before = obstacle.obstacle_matrix["top_left_corner"][1]
+if __name__ == '__main__':
+    rospy.init_node('nav_manager')
 
-        if (blocking_areas is None):
-            blocking_areas = self.get_blocking_areas(
-                x_offset_before, y_offset_before, obstacle_matrix, navigation_map.merged_occ_grid)
+    map_manager = MapManager(0.05, 1.0, "/map", "/map", "/simulated/global_occupancy_grid", "/simulated/all_push_poses")
 
-        x_offset_after, y_offset_after = self.get_new_pos(translation_vector, navigation_map.info.resolution, x_offset_before, y_offset_before)
-        blocking_areas_after_action = self.get_blocking_areas(
-            x_offset_after, y_offset_after, obstacle_matrix, navigation_map.merged_occ_grid)
-        shifted_blocking_areas = [
-            [0 for k in range(len(obstacle_matrix))] for l in range(len(obstacle_matrix[k]))]
+    obstacle1 = Obstacle.from_points_make_polygon(Utils.map_coords_to_real_coords(
+        {(10, 3), (10, 6), (11, 3), (11, 6)},
+        # {(10, 3)},
+        # {(10, 3), (10, 11)},
+        map_manager.multilayered_map.info.resolution),
+        map_manager.multilayered_map.info,
+        map_manager.map_frame,
+        map_manager.robot_metadata,
+        1,
+        True)
+    obstacle2 = Obstacle.from_points_make_polygon(Utils.map_coords_to_real_coords(
+        {(12, 9), (12, 11), (13, 9), (13, 11)},
+        # {(10, 3)},
+        # {(10, 3), (10, 11)},
+        map_manager.multilayered_map.info.resolution),
+        map_manager.multilayered_map.info,
+        map_manager.map_frame,
+        map_manager.robot_metadata,
+        2,
+        True)
 
-        for i in range(len(shifted_blocking_areas)):
-            for j in range(len(shifted_blocking_areas[i])):
-                x = (x_offset_after - x_offset_before) + i
-                y = (y_offset_after - y_offset_before) + j
+    map_manager.manually_add_obstacle(obstacle1)
+    map_manager.manually_add_obstacle(obstacle2)
+    map_manager.publish_ros_merged_occ_grid()
+    map_manager.publish_all_push_poses()
 
-                if (0 < x < len(shifted_blocking_areas) and 0 < y < len(shifted_blocking_areas[x])):
-                    shifted_blocking_areas[x][y] = blocking_areas_after_action[i][j]
+    nav_manager = NavManager(map_manager)
 
-        Z = self.compare(blocking_areas, shifted_blocking_areas)
-        if self.is_zero_matrix(Z)
-            return False
-        return True
+    # Test of plan_for_obstacle
+    p_opt = [Plan([Path(RosPath(), False, nav_manager.MOVE_COST)])]
+    map_cur = map_manager.get_map_copy()
+    r_cur = Utils.ros_pose_from_map_coord(4, 4, map_cur.info.resolution, 1, map_manager.map_frame)
+    r_goal = Utils.ros_pose_from_map_coord(20, 10, map_cur.info.resolution, 1, map_manager.map_frame)
+    blocked_obstacles = set()
 
+    robot_pose_pub = rospy.Publisher("/simulated/robot_pose", PoseStamped, queue_size=1)
+    Utils.publish_once(robot_pose_pub, r_cur)
+    goal_pose_pub = rospy.Publisher("/simulated/goal_pose", PoseStamped, queue_size=1)
+    Utils.publish_once(goal_pose_pub, r_goal)
 
-    def get_blocking_areas(self, x_offset, y_offset, obstacle_matrix, grid):
-        index = 1
-        blocking_areas = [[0 for k in range(len(obstacle_matrix))] for l in range(len(obstacle_matrix[k]))]
+    # nav_manager.plan_for_obstacle(obstacle1, p_opt, map_cur, r_cur, r_goal, blocked_obstacles)
 
-        for i in range(len(blocking_areas)):
-            for j in range(len(blocking_areas[i])):
-                if (obstacle_matrix[x][y] != 0 and grid[x + x_offset][y + y_offset] != 0):
-                    self.assign_nr(blocking_areas, x, y, index)
+    obstacles = list(map_cur.obstacles.values())
+    eu_cost_l = SortedDict()
+    min_cost_l = SortedDict()
 
-        return blocking_areas
+    nav_manager.make_plan(r_cur, r_goal, map_cur, obstacles, blocked_obstacles, p_opt, eu_cost_l, min_cost_l)
 
-
-    def assign_nr(self, blocking_areas, x, y, index):
-        # Note : range(-1, 2) = [-1, 0, 1]
-        for i in range(-1, 2):
-            for j in range(-1, 2):
-                if (blocking_areas[x + i][y + j] != 0):
-                    blocking_areas[x][y] = blocking_areas[x + i][x + j]
-                    return
-        blocking_areas[x][y] = index
-        index = index + 1
-        return
-
-
-    def compare(self, blocking_areas_before, blocking_areas_after):
-        comparison_matrix = copy.deepcopy(blocking_areas_before)
-        del_num = set()
-
-        for x in range(len(comparison_matrix)):
-            for y in range(len(comparison_matrix[x])):
-
-                if (blocking_areas_before[x][y] in del_num):
-                    comparison_matrix[x][y] = 0
-                if (blocking_areas_before[x][y] != 0 and
-                        blocking_areas_after[x][y] != 0):
-                    del_num = del_num.union(comparison_matrix[x][y])
-                    comparison_matrix[x][y] = 0
-
-        return comparison_matrix
-
-    # Helper function for the Efficient Local Opening Detection Algorithm (ELODA)
-    def get_new_pos(self, translation_vector, resolution, x_offset, y_offset):
-        return (x_offset + int(translation_vector[0] / resolution), y_offset + int(translation_vector[1] / resolution))
-
-    def is_zero_matrix(self, Z):
-        for i in range(len(Z)):
-            for j in range(len(Z[i])):
-                if Z[i][j] != 0
-                    return False
-        return True
+    rospy.spin()

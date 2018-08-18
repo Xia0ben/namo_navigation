@@ -1,67 +1,25 @@
-import numpy
-import rospy
-
-from bresenham import bresenham
-
-from nav_msgs.msg import Path
-from utils import Utils
-
 class Plan:
-    def __init__(self, is_multi_path, path, c1, c2, c3, resolution = 1.0, is_manipulation=False, move_cost=1.0, push_cost=1.0):
-        self._is_multi_path = is_multi_path
+    def __init__(self, components, obstacle = None, translation_vector = None, safe_swept_area = None):
 
-        if self._is_multi_path == True:
-            self._c1 = c1
-            self._c2 = c2
-            self._c3 = c3
-            self.cost = c1.cost + c2.cost + c3.cost
-            self.min_cost = c2.cost + c3.cost
-        else:
-            self._move_cost = move_cost
-            self._push_cost = push_cost
-            self.path = path
-            self.path_in_map = Utils.map_path_from_ros_path(ros_path, resolution)
-            self._is_manipulation = is_manipulation
-            self.cost = self.__sum_of_euclidean_distances() * (push_cost if is_manipulation else move_cost)
+        self.components = components
+        self.obstacle = obstacle
+        self.translation_vector = translation_vector
+        self.safe_swept_area = safe_swept_area
 
-    @classmethod
-    def from_path(cls, path, is_manipulation, resolution, move_cost=1.0, push_cost=1.0):
-        path = []
-        return cls(False, path, None, None, None, resolution, is_manipulation, move_cost, push_cost)
+        # If this is a plan with only one path component (avoid all obstacles)
+        self.cost = components[0].cost
+        self.min_cost = None
 
-    @classmethod
-    def from_plans(cls, c1, c2, c3):
-        return cls(True, None, c1, c2, c3)
+        # If this is a plan with more three components (manipulate an obstacle)
+        if len(components) == 3:
+            self.cost = components[0].cost + components[1].cost + components[2].cost
+            self.min_cost = components[1].cost + components[2].cost
 
-    @classmethod
-    def from_poses(cls, init_pose, goal_pose, resolution, is_manipulation, move_cost=1.0, push_cost=1.0):
-        init_map_coords = Utils.map_coord_from_ros_pose(init_pose, resolution)
-        goal_map_coords = Utils.map_coord_from_ros_pose(goal_pose, resolution)
-
-        map_path = list(
-                    bresenham(init_map_coords[0], # x1
-                              init_map_coords[1], # y1
-                              goal_map_coords[0],  # x2
-                              goal_map_coords[1])) # y2
-
-        path = Utils.ros_path_from_map_path(map_path, init_pose, goal_pose, resolution, frame_id = "/map")
-
-        return cls(False, path, None, None, None, resolution, is_manipulation, move_cost, push_cost)
-
-    def __sum_of_euclidean_distances(self):
-        if not self._is_multi_path:
-            sum = 0.0
-            poses = self.path.poses
-            for i in range(len(poses) - 1):
-                current_pose_np = numpy.array([poses[i].pose.position.x, poses[i].pose.position.y])
-                next_pose_np = numpy.array([poses[i + 1].pose.position.x, poses[i + 1].pose.position.y])
-                sum = sum + numpy.linalg.norm(next_pose_np - current_pose_np)
-            return sum
-
-
+    def set_obstacle(self, obstacle):
+        self.obstacle = obstacle
 
     def intersects_with_obstacles(self, occupancy_grid):
-        
+
 
         """
         Use the following four lines if you would rather test intersection

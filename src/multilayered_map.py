@@ -18,8 +18,8 @@ class MultilayeredMap:
         self.frame_id = frame_id
         # Only contains static obstacles data (walls, static furniture, ...)
         # as defined in the map given to the map server
-        self.static_occ_grid = np.array(rosMap.data).reshape(
-            (self.info.height, self.info.width))
+        self.static_occ_grid = np.rot90(np.array(rosMap.data).reshape(
+            (self.info.height, self.info.width)), 3)
         self.static_occ_grid[self.static_occ_grid == 100] = Utils.ROS_COST_LETHAL
         self.static_occ_grid[self.static_occ_grid == 0] = Utils.ROS_COST_FREE_SPACE
         self.static_obstacles_positions = self._get_static_obstacles_positions()
@@ -36,6 +36,10 @@ class MultilayeredMap:
 
     def manually_add_obstacle(self, obstacle):
         self.obstacles.update({obstacle.obstacle_id: obstacle})
+        self.compute_merged_occ_grid()
+
+    def manually_move_obstacle(self, obstacle_id, translation):
+        self.obstacles[obstacle_id].move(translation)
         self.compute_merged_occ_grid()
 
     def compute_merged_occ_grid(self):
