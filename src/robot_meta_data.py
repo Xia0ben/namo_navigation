@@ -4,11 +4,9 @@ import math
 from utils import Utils
 
 class RobotMetaData:
-    SQRT_2 = math.sqrt(2.0)
-
     def __init__(self, radius = 0.5, fov_radius = 1.0, map_resolution = 0.05):
         self.radius = float(radius)
-        self.radius_div_by_sqrt_2 = self.radius / RobotMetaData.SQRT_2
+        self.radius_div_by_sqrt_2 = self.radius / Utils.SQRT_2
         self.diameter = self.radius * 2.0
         self.fov_radius = fov_radius
         self.footprint = RobotMetaData.get_odd_circular_footprint(self.radius, map_resolution)

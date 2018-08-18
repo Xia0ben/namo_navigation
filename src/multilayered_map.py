@@ -7,15 +7,24 @@ from sensor_msgs.msg import PointCloud, ChannelFloat32
 from obstacle import Obstacle
 from utils import Utils
 
+class IntersectionWithObstaclesException(Exception):
+    pass
+
+class ObstacleOutOfBoundsException(Exception):
+    pass
+
+class IntersectionWithRobotException(Exception):
+    pass
+
 class MultilayeredMap:
     PSEUDO_INFLATION_FOOTPRINT = [[Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
                                   [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
                                   [Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL]]
 
-    def __init__(self, rosMap, frame_id, robot_metadata):
+    def __init__(self, rosMap, robot_metadata):
         self.info = rosMap.info
         self.robot_metadata = robot_metadata
-        self.frame_id = frame_id
+        self.frame_id = rosMap.header.frame_id
         # Only contains static obstacles data (walls, static furniture, ...)
         # as defined in the map given to the map server
         self.static_occ_grid = np.rot90(np.array(rosMap.data).reshape(
@@ -34,9 +43,43 @@ class MultilayeredMap:
         self.merged_occ_grid = copy.deepcopy(self.inflated_static_occ_grid)
         self.compute_merged_occ_grid()
 
-    def manually_add_obstacle(self, obstacle):
+    def manually_add_obstacle(self, points_set, obstacle_id, movability, robot_polygon):
+        obstacle = Obstacle.from_points_make_polygon(
+            points_set,
+            self.info,
+            self.frame_id,
+            self.robot_metadata,
+            obstacle_id,
+            movability)
+        # Raise exception if obstacle in intersection with robot
+        if robot_polygon is not None and obstacle.polygon.intersects(robot_polygon):
+            raise IntersectionWithRobotException
+
+        # Raise exception if any of the obstacle's points are out of map bounds
+        for map_point in obstacle.map_points_set:
+            if not Utils._is_in_matrix(map_point[0], map_point[1], len(self.static_occ_grid), len(self.static_occ_grid[0])):
+                raise ObstacleOutOfBoundsException
+
+        # Raise exception if obstacle intersects another obstacle or the static obstacles
+        if self.is_obstacle_intersecting_others(obstacle):
+            raise IntersectionWithObstaclesException
+
         self.obstacles.update({obstacle.obstacle_id: obstacle})
         self.compute_merged_occ_grid()
+
+    def is_obstacle_intersecting_others(self, obstacle):
+        # Check for non-static obstacles
+        for other_obstacle in self.obstacles.values():
+            if obstacle.polygon.intersects(other_obstacle.polygon):
+                return True
+
+        # Check for static obstacles
+        for map_point in obstacle.discretized_polygon:
+            if map_point in self.static_obstacles_positions:
+                return True
+
+        # If all checks pass, return True
+        return False
 
     def manually_move_obstacle(self, obstacle_id, translation):
         self.obstacles[obstacle_id].move(translation)

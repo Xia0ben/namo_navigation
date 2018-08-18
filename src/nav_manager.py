@@ -31,6 +31,11 @@ class NavManager:
         self.map_manager = map_manager
         self.global_planner = GlobalPlanner()
 
+
+    def _global_goal_pose_callback(self, global_goal_pose):
+        pass
+        # "/move_base_simple/goal"
+
     def _get_safe_swept_area(self, obstacle, translation_vector, occupancy_grid):
         # FIXME Don't just get manipulation area from obstacle polygon but also robot polygon, therefore, the method should move into MultilayeredMap class
         manipulation_area_map_points = obstacle.get_manipulation_area_map_points(translation_vector)
@@ -250,7 +255,7 @@ if __name__ == '__main__':
         # {(10, 3), (10, 11)},
         map_manager.multilayered_map.info.resolution),
         map_manager.multilayered_map.info,
-        map_manager.map_frame,
+        map_manager.multilayered_map.frame_id,
         map_manager.robot_metadata,
         1,
         True)
@@ -260,7 +265,7 @@ if __name__ == '__main__':
         # {(10, 3), (10, 11)},
         map_manager.multilayered_map.info.resolution),
         map_manager.multilayered_map.info,
-        map_manager.map_frame,
+        map_manager.multilayered_map.frame_id,
         map_manager.robot_metadata,
         2,
         True)
@@ -275,8 +280,8 @@ if __name__ == '__main__':
     # Test of plan_for_obstacle
     p_opt = [Plan([Path(RosPath(), False, nav_manager.MOVE_COST)])]
     map_cur = map_manager.get_map_copy()
-    r_cur = Utils.ros_pose_from_map_coord(4, 4, map_cur.info.resolution, 1, map_manager.map_frame)
-    r_goal = Utils.ros_pose_from_map_coord(20, 10, map_cur.info.resolution, 1, map_manager.map_frame)
+    r_cur = Utils.ros_pose_from_map_coord_yaw(4, 4, 0.0, map_cur.info.resolution, 1, map_manager.multilayered_map.frame_id)
+    r_goal = Utils.ros_pose_from_map_coord_yaw(20, 10, 0.0, map_cur.info.resolution, 1, map_manager.multilayered_map.frame_id)
     blocked_obstacles = set()
 
     robot_pose_pub = rospy.Publisher("/simulated/robot_pose", PoseStamped, queue_size=1)

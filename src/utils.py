@@ -3,7 +3,7 @@ import tf
 import math
 import numpy as np
 from geometry_msgs.msg import PoseStamped, Quaternion, Polygon as RosPolygon, Point32, Point, PolygonStamped
-from nav_msgs.msg import Path as RosPath, GridCells
+from nav_msgs.msg import Path as RosPath, GridCells, OccupancyGrid
 
 class Utils:
     TF_LISTENER = tf.TransformListener()
@@ -20,6 +20,8 @@ class Utils:
     ROS_COST_POSSIBLY_CIRCUMSCRIBED = 51
     ROS_COST_POSSIBLY_NONFREE = 1
     ROS_COST_FREE_SPACE = 0
+
+    SQRT_2 = math.sqrt(2.0)
 
     """
     The following loop is because publishing in topics sometimes fails the first time you publish.
@@ -102,28 +104,26 @@ class Utils:
 
         # If path is not empty, add poses, otherwise ros path stays empty
         if map_path:
+            start_pose.header.seq = 1
             poses = [start_pose]
 
-            id_counter = 1
+            id_counter = 2
+            previous_pose = start_pose
             for point in map_path[1:len(map_path) - 1]:
-                new_pose = Utils.ros_pose_from_map_coord(point[0], point[1], resolution, id_counter, frame_id)
+                new_pose = Utils.ros_pose_from_map_coord_yaw(point[0], point[1], 0.0, resolution, id_counter, frame_id)
+                direction_vector = (new_pose.pose.position.x - previous_pose.pose.position.x,
+                                    new_pose.pose.position.y - previous_pose.pose.position.y)
+                new_pose.pose.orientation = Utils.geom_quat_from_yaw(Utils.yaw_from_direction(direction_vector))
                 id_counter = id_counter + 1
+                previous_pose = new_pose
                 poses.append(new_pose)
 
+            end_pose.header.seq = id_counter
             poses.append(end_pose)
 
         ros_path.poses = poses
 
         return ros_path
-
-    @staticmethod
-    def map_path_from_ros_path(ros_path, resolution):
-        map_path = []
-
-        for pose in ros_path.poses:
-            map_path.append(Utils.map_coord_from_ros_pose(pose, resolution))
-
-        return map_path
 
 
     ##################### TODO MAKE USE OF THESE METHODS EVERYWHERE
@@ -152,25 +152,30 @@ class Utils:
     ##################### ENDOFTODO MAKE USE OF THESE METHODS EVERYWHERE
 
     @staticmethod
-    def ros_pose_from_map_coord(coordX, coordY, resolution, point_id, frame_id):
+    def yaw_from_direction(direction_vector):
+        if direction_vector[1] < 0:
+            yaw = 2 * math.pi - math.acos(
+                direction_vector[0] / math.sqrt(direction_vector[0] ** 2 + direction_vector[1] ** 2))
+        else:
+            yaw = math.acos(
+                direction_vector[0] / math.sqrt(direction_vector[0] ** 2 + direction_vector[1] ** 2))
+        return yaw
+
+
+    @staticmethod
+    def ros_pose_from_map_coord_yaw(coordX, coordY, yaw, resolution, point_id, frame_id):
         new_pose = PoseStamped()
         new_pose.header.seq = point_id
         new_pose.header.stamp = rospy.Time(0)
         new_pose.header.frame_id = frame_id
-        new_pose.pose.position.x = resolution * (float(coordX) + 0.5)
-        new_pose.pose.position.y = resolution * (float(coordY) + 0.5)
-        new_pose.pose.orientation.x = 0.0
-        new_pose.pose.orientation.y = 0.0
-        new_pose.pose.orientation.z = 0.0
-        new_pose.pose.orientation.w = 0.0
+        new_pose.pose.position.x, new_pose.pose.position.y = Utils.map_to_real(coordX, coordY, resolution)
+        new_pose.pose.orientation = Utils.geom_quat_from_yaw(yaw)
 
         return new_pose
 
     @staticmethod
     def map_coord_from_ros_pose(ros_pose, resolution):
-        coordX = int(ros_pose.pose.position.x / resolution)
-        coordY = int(ros_pose.pose.position.y / resolution)
-        return coordX, coordY
+        return Utils.real_to_map(ros_pose.pose.position.x, ros_pose.pose.position.y, resolution)
 
     @staticmethod
     def euclidean_distance_ros_poses(init_pose, goal_pose):
@@ -322,3 +327,11 @@ class Utils:
         polygon_stamped.polygon = ros_polygon
         return polygon_stamped
 
+    @staticmethod
+    def convert_matrix_to_ros_occ_grid(matrix, header, info):
+        ros_occ_grid = OccupancyGrid()
+        ros_occ_grid.header = header
+        ros_occ_grid.header.stamp = rospy.Time(0)
+        ros_occ_grid.info = info
+        ros_occ_grid.data = list(map(int, np.flipud(np.rot90(matrix, 1)).flatten()))
+        return ros_occ_grid

@@ -4,15 +4,17 @@ from bresenham import bresenham
 from shapely.geometry import Point, MultiPoint, LineString
 from shapely import affinity
 from utils import Utils
-
+from enum import Enum
 import rospy
 import copy
 import math
 
+Movability = Enum('Movability', 'maybe_movable movable unmovable')
 
 class Obstacle:
+    obstacle_id_counter = 1
 
-    def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable = True, axis_rect_hypothesis = True):
+    def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, movability, axis_rect_hypothesis = True):
         # Copy obstacle representations from parameters
         self.points_set = points_set
         self.map_metadata = map_metadata
@@ -22,7 +24,7 @@ class Obstacle:
         self.axis_rect_hypothesis = axis_rect_hypothesis
 
         # Obstacle semantic
-        self.is_movable = is_movable
+        self.movability = movability
 
         # Create subsequent properties
         self._shapely_multipoint = None
@@ -43,11 +45,11 @@ class Obstacle:
 
     # CLASS METHOD TO CREATE POLYGON SET OF POINTS TO GIVE TO CONSTRUCTOR
     @classmethod
-    def from_points_make_polygon(cls, polygon_vertices_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable = True, axis_rect_hypothesis = True):
+    def from_points_make_polygon(cls, polygon_vertices_set, map_metadata, frame_id, robot_metadata, obstacle_id, movability, axis_rect_hypothesis = True):
         shapely_multipoint = MultiPoint(list(polygon_vertices_set))
         discretized_polygon = Obstacle._make_discretized_polygon(shapely_multipoint.convex_hull, shapely_multipoint.convex_hull, map_metadata.resolution)
         points_set = Utils.map_coords_to_real_coords(discretized_polygon, map_metadata.resolution)
-        return cls(points_set, map_metadata, frame_id, robot_metadata, obstacle_id, is_movable, axis_rect_hypothesis)
+        return cls(points_set, map_metadata, frame_id, robot_metadata, obstacle_id, movability, axis_rect_hypothesis)
 
     # We assume that the robot goes in a straight line when moving the object,
     # which allows us to use a convex hull to determine the safe swept area,

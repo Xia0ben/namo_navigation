@@ -12,12 +12,11 @@ from utils import Utils
 from obstacle import Obstacle
 
 class MapManager:
-    def __init__(self, robot_radius, robot_fov_radius, map_frame, static_map_topic, merged_occ_grid_topic, push_poses_topic):
+    def __init__(self, robot_radius, robot_fov_radius, static_map_topic, merged_occ_grid_topic, push_poses_topic):
         # Get parameters
         self.static_map_topic = static_map_topic # rospy.get_param('~map_topic')
         self.merged_occ_grid_topic = merged_occ_grid_topic
         self.push_poses_topic = push_poses_topic
-        self.map_frame = map_frame # rospy.get_param('~map_frame')
 
         # Declare common parameters
         self.static_map = None
@@ -36,7 +35,7 @@ class MapManager:
         while self.static_map is None:
             rospy.sleep(0.2)
         self.robot_metadata = RobotMetaData(robot_radius, robot_fov_radius, self.static_map.info.resolution)
-        self.init_map = MultilayeredMap(self.static_map, map_frame, self.robot_metadata)
+        self.init_map = MultilayeredMap(self.static_map, self.robot_metadata)
         self.multilayered_map = copy.deepcopy(self.init_map)
 
     def static_map_callback(self, new_map):
@@ -56,11 +55,7 @@ class MapManager:
         self.multilayered_map.manually_add_obstacle(obstacle)
 
     def publish_ros_merged_occ_grid(self):
-        ros_merged_occ_grid = OccupancyGrid()
-        ros_merged_occ_grid.header = self.static_map.header
-        ros_merged_occ_grid.header.stamp = rospy.Time(0)
-        ros_merged_occ_grid.info = self.static_map.info
-        ros_merged_occ_grid.data = list(map(int, np.flipud(np.rot90(self.multilayered_map.merged_occ_grid, 1)).flatten()))
+        ros_merged_occ_grid = Utils.convert_matrix_to_ros_occ_grid(self.multilayered_map.merged_occ_grid, self.static_map.header, self.static_map.info)
         Utils.publish_once(self.simulated_merged_occ_grid_pub, ros_merged_occ_grid)
 
     def publish_all_push_poses(self):
@@ -74,7 +69,7 @@ class MapManager:
 
 if __name__ == '__main__':
     rospy.init_node('map_manager')
-    map_manager = MapManager(0.05, 1.0, "/map", "/map", "/simulated/global_occupancy_grid", "/simulated/all_push_poses")
+    map_manager = MapManager(0.05, 1.0, "/map", "/simulated/global_occupancy_grid", "/simulated/all_push_poses")
 
     # This obstacle with these specific coordinates can only be inserted in the 01 map
     obstacle1 = Obstacle.from_points_make_polygon(Utils.map_coords_to_real_coords(
