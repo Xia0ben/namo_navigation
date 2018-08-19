@@ -4,17 +4,21 @@ import rospy
 import numpy as np
 import copy
 from sensor_msgs.msg import PointCloud, ChannelFloat32
-from obstacle import Obstacle
+from obstacle import Obstacle, Movability
 from utils import Utils
+
 
 class IntersectionWithObstaclesException(Exception):
     pass
 
+
 class ObstacleOutOfBoundsException(Exception):
     pass
 
+
 class IntersectionWithRobotException(Exception):
     pass
+
 
 class MultilayeredMap:
     PSEUDO_INFLATION_FOOTPRINT = [[Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL, Utils.ROS_COST_LETHAL],
@@ -35,6 +39,7 @@ class MultilayeredMap:
         # self.pseudo_inflated_static_occ_grid = self._get_pseudo_inflated_static_occ_grid(MultiLayeredMap.PSEUDO_INFLATION_FOOTPRINT)
         self.inflated_static_occ_grid = self._get_inflated_static_occ_grid(robot_metadata.footprint)
 
+        self.free_space_created = False
 
         # Only contains non-static (potentially movable) obstacles data (chairs, boxes, tables, ...)
         self.obstacles = {}
@@ -103,17 +108,17 @@ class MultilayeredMap:
             xO = 0
 
     #@staticmethod
-    def is_in_fov(point, pose_np, radius):
-        return np.linalg.norm(np.array(point) - pose_np) <= radius
+    def is_in_fov(self, point, current_position, radius):
+        return Utils.euclidean_distance(point, current_position) <= radius
 
     def get_point_cloud_in_fov(self, current_pose):
-        current_pose_np = np.array((current_pose.pose.position.x, current_pose.pose.position.y))
+        current_position = (current_pose.pose.position.x, current_pose.pose.position.y)
         fov_radius = self.robot_metadata.fov_radius
 
         fov_point_cloud = PointCloud()
         fov_point_cloud.header.seq = 1
         fov_point_cloud.header.frame_id = self.frame_id
-        fov_point_cloud.header.stamp = rospy.Time(0)
+        fov_point_cloud.header.stamp = rospy.Time.now()
         fov_point_cloud.points = []
         fov_point_cloud.channels = [ChannelFloat32()]
         fov_point_cloud.channels[0].name = "obstacle_id"
@@ -126,24 +131,24 @@ class MultilayeredMap:
             # If obstacle is characterized by more than four points, it is more
             # interesting to first check if its boundaries are within the fov
             # radius. If not, then we simply go on to estimating the next obstacle.
-            if len(obstacle.envelope) - 1 > 4:
-                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, fov_radius)):
+            if len(obstacle.ros_point_cloud.points) > 4:
+                if not (self.is_in_fov(obstacle.envelope.exterior.coords[0], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[1], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[2], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[3], current_position, fov_radius)):
                         continue
 
             # Iterate over the points of the obstacle's point cloud and add them
             # to the point cloud in fov
             for point in obstacle.ros_point_cloud.points:
-                if MultilayeredMap.is_in_fov((point.x, point.y), current_pose_np, fov_radius):
+                if self.is_in_fov((point.x, point.y), current_position, fov_radius):
                     fov_point_cloud.points.append(point)
                     fov_point_cloud.channels[0].values.append(obstacle_id)
 
         return fov_point_cloud
 
     def get_point_dict_in_fov(self, current_pose):
-        current_pose_np = np.array((current_pose.pose.position.x, current_pose.pose.position.y))
+        current_position = (current_pose.pose.position.x, current_pose.pose.position.y)
         fov_radius = self.robot_metadata.fov_radius
 
         fov_point_dict = {}
@@ -155,20 +160,21 @@ class MultilayeredMap:
             # If obstacle is characterized by more than four points, it is more
             # interesting to first check if its boundaries are within the fov
             # radius. If not, then we simply go on to estimating the next obstacle.
-            if len(obstacle.envelope) - 1 > 4:
-                if not (MultilayeredMap.is_in_fov(obstacle.envelope[0], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[1], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[2], current_pose_np, fov_radius) or
-                        MultilayeredMap.is_in_fov(obstacle.envelope[3], current_pose_np, fov_radius)):
+            if len(obstacle.points_set) > 4:
+                if not (self.is_in_fov(obstacle.envelope.exterior.coords[0], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[1], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[2], current_position, fov_radius) or
+                        self.is_in_fov(obstacle.envelope.exterior.coords[3], current_position, fov_radius)):
                         continue
-
-            fov_point_dict.update({obstacle_id, set()})
 
             # Iterate over the points of the obstacle's point cloud and add them
             # to the point cloud in fov
             for point in obstacle.points_set:
-                if MultilayeredMap.is_in_fov(point, current_pose_np, fov_radius):
-                    fov_point_dict[obstacle_id].add()
+                if self.is_in_fov(point, current_position, fov_radius):
+                    try:
+                        fov_point_dict[obstacle_id].add(point)
+                    except KeyError:
+                        fov_point_dict.update({obstacle_id: {point}})
 
         return fov_point_dict
 
@@ -185,10 +191,11 @@ class MultilayeredMap:
     #     return point_dict
 
     def update_from_point_cloud(self, input_point_cloud, current_pose):
-        to_remove_point_dict = self.get_point_cloud_in_fov(current_pose)
-        to_add_point_dict = {}
+        to_remove_point_obs_dict = self.get_point_dict_in_fov(current_pose)
+        to_add_point_obs_dict = {}
         to_create_obs_dict = {}
 
+        # Translate pointcloud as modifications for obstacles
         for point32, obstacle_id_float in zip(input_point_cloud.points, input_point_cloud.channels[0].values):
             obstacle_id = int(obstacle_id_float)
             point = (point32.x, point32.y)
@@ -196,36 +203,47 @@ class MultilayeredMap:
             try:
                 # Try to get the corresponding obstacle in obstacles dict
                 obstacle = self.obstacles[obstacle_id]
+
+                # If input point exists in both point clouds, don't remove later from obstacle point cloud
+                if point in obstacle.points_set:
+                    to_remove_point_obs_dict[obstacle_id].remove(point)
+                    # If set is empty, remove obstacle altogether
+                    if not to_remove_point_obs_dict[obstacle_id]:
+                        del to_remove_point_obs_dict[obstacle_id]
+                else:
+                    # If the obstacle does not already have this point, add it later
+                    try:
+                        obs_points_set = to_add_point_obs_dict[obstacle_id]
+                        obs_points_set.add(point)
+                    except KeyError:
+                        to_add_point_obs_dict.update({obstacle_id: {point}})
+
             except KeyError:
-                # If obstacle is not found, create obstacle and add point to it
-                obstacle = Obstacle({point}, self.info, self.frame_id, self.robot_metadata, obstacle_id, True)
-                # Get to the next point
-                continue
+                # If obstacle is not found, we will create it later with its points
+                try:
+                    obs_points_set = to_create_obs_dict[obstacle_id]
+                    obs_points_set.add(point)
+                except KeyError:
+                    to_create_obs_dict.update({obstacle_id: {point}})
 
-            if obstacle.has_point(point):
-                # If input point exists in both point clouds, don't remove later
-                # from obstacle point cloud
-                to_remove_point_dict[obstacle_id].remove(point)
-            else:
-                # If input point doesn't exist in obstacle, add it
-                obstacle.add_point(point)
+        # Modify obstacles, remove, add, and create
+        for obstacle_id, obs_points_set in to_remove_point_obs_dict.items():
+            self.obstacles[obstacle_id].remove_points(obs_points_set)
+            self.free_space_created = True
 
-        # Remove all points that are not in common or have not just been added
-        # from obstacle point cloud
-        for obstacle_id, point_set in to_remove_point_dict.items():
-            for point in point_set:
-                self.obstacles[obstacle_id].remove_point(point)
+        for obstacle_id, obs_points_set in to_add_point_obs_dict.items():
+            self.obstacles[obstacle_id].add_points(obs_points_set)
+
+        for obstacle_id, obs_points_set in to_create_obs_dict.items():
+            new_obstacle = Obstacle(obs_points_set, self.info, self.frame_id, self.robot_metadata, obstacle_id, Movability.maybe_movable)
+            self.obstacles.update({new_obstacle.obstacle_id: new_obstacle})
 
         self.compute_merged_occ_grid()
 
     def has_free_space_been_created(self):
-        # FIXME return true if we moved an object (or if an object moved by
-        # itself). Will require keeping track of calls to function. For
-        # simulation, the simulator can directly provide data about whether an
-        # obstacle has been moved or not, but for a real application, we will
-        # need to evaluate if any of the points in the map integer coordinate
-        # system have been moved for each obstacle.
-        return True
+        value_on_call = self.free_space_created
+        self.free_space_created = False
+        return value_on_call
 
     # def pushUsingGraspPointPossible(self, obstacle, graspPoint):
     # # FIXME first simulate a discrete push in d. Don't forget to update both obstacle.x and y !

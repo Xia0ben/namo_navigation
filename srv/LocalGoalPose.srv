@@ -1,0 +1,4 @@
+geometry_msgs/PoseStamped local_pose_goal
+bool is_manipulation
+---
+geometry_msgs/PoseStamped real_pose

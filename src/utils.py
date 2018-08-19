@@ -4,6 +4,8 @@ import math
 import numpy as np
 from geometry_msgs.msg import PoseStamped, Quaternion, Polygon as RosPolygon, Point32, Point, PolygonStamped
 from nav_msgs.msg import Path as RosPath, GridCells, OccupancyGrid
+import copy
+
 
 class Utils:
     TF_LISTENER = tf.TransformListener()
@@ -39,7 +41,7 @@ class Utils:
     @staticmethod
     def get_current_pose(map_frame, robot_frame):
 
-        time  = rospy.Time(0) # Makes sure same tf is used for calls
+        time  = rospy.Time.now() # Makes sure same tf is used for calls
         robot_pose = PoseStamped()
 
         while True:
@@ -47,7 +49,7 @@ class Utils:
                 (position, quaternion) = Utils.TF_LISTENER.lookupTransform(map_frame, robot_frame, time)
 
                 robot_pose.header.seq = 1
-                robot_pose.header.stamp = rospy.Time(0)
+                robot_pose.header.stamp = rospy.Time.now()
                 robot_pose.header.frame_id = map_frame
                 robot_pose.pose.position.x = position[0]
                 robot_pose.pose.position.y = position[1]
@@ -85,19 +87,35 @@ class Utils:
         return geom_quat
 
     @staticmethod
-    def ros_path_from_poses(start_pose, end_pose, frame_id):
+    def ros_path_from_poses(start_pose, end_pose, frame_id, push_pose_unit_direction_vector, push_unit_distance):
+        start_pose.header.seq = 1
+
         ros_path = RosPath()
         ros_path.header.seq = 1
-        ros_path.header.stamp = rospy.Time(0)
+        ros_path.header.stamp = rospy.Time.now()
         ros_path.header.frame_id = frame_id
-        ros_path.poses = [start_pose, end_pose]
+        ros_path.poses = [start_pose]
+        distance_between_poses = Utils.euclidean_distance_ros_poses(start_pose, end_pose)
+        current_distance = push_unit_distance
+        new_pose = copy.deepcopy(start_pose)
+        while current_distance <= distance_between_poses:
+            new_pose = copy.deepcopy(new_pose)
+            new_pose.header.seq = new_pose.header.seq + 1
+            new_pose.pose.position.x = new_pose.pose.position.x + push_pose_unit_direction_vector[0] * push_unit_distance
+            new_pose.pose.position.y = new_pose.pose.position.y + push_pose_unit_direction_vector[1] * push_unit_distance
+            ros_path.poses.append(new_pose)
+            current_distance = current_distance + push_unit_distance
+
+        end_pose.header.seq = new_pose.header.seq + 1
+        ros_path.poses.append(end_pose)
+
         return ros_path
 
     @staticmethod
     def ros_path_from_map_path(map_path, start_pose, end_pose, resolution, frame_id):
         ros_path = RosPath()
         ros_path.header.seq = 1
-        ros_path.header.stamp = rospy.Time(0)
+        ros_path.header.stamp = rospy.Time.now()
         ros_path.header.frame_id = frame_id
 
         poses = []
@@ -166,7 +184,7 @@ class Utils:
     def ros_pose_from_map_coord_yaw(coordX, coordY, yaw, resolution, point_id, frame_id):
         new_pose = PoseStamped()
         new_pose.header.seq = point_id
-        new_pose.header.stamp = rospy.Time(0)
+        new_pose.header.stamp = rospy.Time.now()
         new_pose.header.frame_id = frame_id
         new_pose.pose.position.x, new_pose.pose.position.y = Utils.map_to_real(coordX, coordY, resolution)
         new_pose.pose.orientation = Utils.geom_quat_from_yaw(yaw)
@@ -250,33 +268,74 @@ class Utils:
                 (float_coord_x + resolution, float_coord_y + resolution),
                 (float_coord_x, float_coord_y + resolution)}
 
+
+    @staticmethod
+    def publish_ros_path(path, topic):
+        pub = rospy.Publisher(topic, RosPath, queue_size=1)
+        Utils.publish_once(pub, path)
+
     @staticmethod
     def debug_publish_path(path, topic):
-        Utils.publish_path(path, topic)
+        Utils.publish_ros_path(path.path, topic)
+
+    @staticmethod
+    def debug_erase_partial_paths():
+        empty_path = RosPath()
+        empty_path.header.frame_id = "/map"
+        Utils.publish_ros_path(empty_path, "/simulated/debug_c1")
+        Utils.publish_ros_path(empty_path, "/simulated/debug_c2")
+        Utils.publish_ros_path(empty_path, "/simulated/debug_c3")
+
+    @staticmethod
+    def erase_final_paths():
+        empty_path = RosPath()
+        empty_path.header.frame_id = "/map"
+        Utils.publish_ros_path(empty_path, "/simulated/p_opt_c1")
+        Utils.publish_ros_path(empty_path, "/simulated/p_opt_c2")
+        Utils.publish_ros_path(empty_path, "/simulated/p_opt_c3")
+        Utils.publish_ros_path(empty_path, "/simulated/p_opt_no")
+
+    @staticmethod
+    def clean_up_viz():
+        Utils.debug_erase_partial_paths()
+        Utils.erase_final_paths()
+
+        empty_pose = PoseStamped()
+        empty_pose.header.frame_id = "/map"
+        goal_pose_pub = rospy.Publisher("/simulated/goal_pose", PoseStamped, queue_size=1)
+        Utils.publish_once(goal_pose_pub, empty_pose)
+        #
+        # empty_polygon = PolygonStamped()
+        # empty_polygon.header.frame_id = "/map"
+        # pub = rospy.Publisher("/simulated/debug_polygon", PolygonStamped, queue_size=1)
+        # Utils.publish_once(pub, empty_polygon)
+
+
 
     @staticmethod
     def publish_plan(plan):
+        empty_path = RosPath()
+        empty_path.header.frame_id = "/map"
         if len(plan.components) == 1:
             p_opt_pub = rospy.Publisher("/simulated/p_opt_no", RosPath, queue_size=1)
+            Utils.publish_ros_path(empty_path, "/simulated/p_opt_c1")
+            Utils.publish_ros_path(empty_path, "/simulated/p_opt_c2")
+            Utils.publish_ros_path(empty_path, "/simulated/p_opt_c3")
             Utils.publish_once(p_opt_pub, plan.components[0].path)
         elif len(plan.components) == 3:
             c1_pub = rospy.Publisher("/simulated/p_opt_c1", RosPath, queue_size=1)
             c2_pub = rospy.Publisher("/simulated/p_opt_c2", RosPath, queue_size=1)
             c3_pub = rospy.Publisher("/simulated/p_opt_c3", RosPath, queue_size=1)
+            Utils.publish_ros_path(empty_path, "/simulated/p_opt_no")
             Utils.publish_once(c1_pub, plan.components[0].path)
             Utils.publish_once(c2_pub, plan.components[1].path)
             Utils.publish_once(c3_pub, plan.components[2].path)
 
     @staticmethod
-    def publish_path(path, topic):
-        pub = rospy.Publisher(topic, RosPath, queue_size=1)
-        Utils.publish_once(pub, path.path)
-
-    @staticmethod
     def debug_publish_real_coords(real_coords, topic):
         grid_cells = GridCells()
         grid_cells.header.seq = 1
-        grid_cells.header.stamp = rospy.Time(0)
+        grid_cells.header.stamp = rospy.Time.now()
         grid_cells.header.frame_id = "/map"
         grid_cells.cell_width = 0.01
         grid_cells.cell_height = grid_cells.cell_width
@@ -292,7 +351,7 @@ class Utils:
     def debug_publish_map_coords(map_coords, topic):
         grid_cells = GridCells()
         grid_cells.header.seq = 1
-        grid_cells.header.stamp = rospy.Time(0)
+        grid_cells.header.stamp = rospy.Time.now()
         grid_cells.header.frame_id = "/map"
         grid_cells.cell_width = 0.05
         grid_cells.cell_height = grid_cells.cell_width
@@ -312,10 +371,15 @@ class Utils:
         Utils.publish_once(pub, ros_polygon)
 
     @staticmethod
+    def publish_goal_pose_for_display(pose):
+        goal_pose_pub = rospy.Publisher("/simulated/goal_pose", PoseStamped, queue_size=1)
+        Utils.publish_once(goal_pose_pub, pose)
+
+    @staticmethod
     def convert_shapely_as_ros_polygon(shapely_polygon):
         polygon_stamped = PolygonStamped()
         polygon_stamped.header.seq = 1
-        polygon_stamped.header.stamp = rospy.Time(0)
+        polygon_stamped.header.stamp = rospy.Time.now()
         polygon_stamped.header.frame_id = "/map"
         ros_polygon = RosPolygon()
         coords = list(shapely_polygon.exterior.coords)
@@ -331,7 +395,7 @@ class Utils:
     def convert_matrix_to_ros_occ_grid(matrix, header, info):
         ros_occ_grid = OccupancyGrid()
         ros_occ_grid.header = header
-        ros_occ_grid.header.stamp = rospy.Time(0)
+        ros_occ_grid.header.stamp = rospy.Time.now()
         ros_occ_grid.info = info
         ros_occ_grid.data = list(map(int, np.flipud(np.rot90(matrix, 1)).flatten()))
         return ros_occ_grid

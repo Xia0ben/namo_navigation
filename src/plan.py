@@ -1,63 +1,68 @@
+import copy
+from utils import Utils
+
 class Plan:
-    def __init__(self, components, obstacle = None, translation_vector = None, safe_swept_area = None):
+    C1 = 0
+    C2 = 1
+    C3 = 2
+    NB_MAX_COMPONENTS = 3
+
+    def __init__(self, components, obstacle = None, translation_vector = None, safe_swept_area = None, push_pose = None):
 
         self.components = components
         self.obstacle = obstacle
         self.translation_vector = translation_vector
         self.safe_swept_area = safe_swept_area
+        self.push_pose = push_pose
 
         # If this is a plan with only one path component (avoid all obstacles)
-        self.cost = components[0].cost
+        self.cost = components[Plan.C1].cost
         self.min_cost = None
 
         # If this is a plan with more three components (manipulate an obstacle)
-        if len(components) == 3:
-            self.cost = components[0].cost + components[1].cost + components[2].cost
-            self.min_cost = components[1].cost + components[2].cost
-
-    def set_obstacle(self, obstacle):
-        self.obstacle = obstacle
-
-    def intersects_with_obstacles(self, occupancy_grid):
+        if len(self.components) == Plan.NB_MAX_COMPONENTS:
+            self.cost = components[Plan.C1].cost + components[Plan.C2].cost + components[Plan.C3].cost
+            self.min_cost = components[Plan.C2].cost + components[Plan.C3].cost
 
 
-        """
-        Use the following four lines if you would rather test intersection
-        with a list of obstacles.
-        """
-        # for obstacle in obstacles:
-        #     if _intersectsWithObstacle(obstacle):
-        #         return True
-        # return False
+        self.next_step = None
+        if self.components[Plan.C1].path.poses:
+            self.next_step = self.components[Plan.C1].path.poses[0]
+        self._step_counter = 0
+        self.next_step_component = Plan.C1
 
-    def _intersectsWithObstacle(self, obstacle):
+    def is_plan_colliding(self, multilayered_map):
+        is_c1_colliding = self.components[0].is_path_colliding(multilayered_map, True)
 
-        # Test to use if we want to check whether the path enters in collision with a specific obstacle or not.
+        if is_c1_colliding:
+            return True
 
-        return True  # TODO do actual test here eventually using ROS capabilities
+        if len(self.components) == Plan.NB_MAX_COMPONENTS:
+            for point in self.safe_swept_area:
+                if (point not in self.obstacle.discretized_polygon and
+                        multilayered_map.merged_occ_grid[point[0]][point[1]] == Utils.ROS_COST_LETHAL):
+                    return True
 
-        # Check if multipath -> if yes, apply following lines to c1, c2 and c3 (merge les arrays de position ?)
-        # -> if no, apply following lines to path
+            map_mod = copy.deepcopy(multilayered_map)
+            map_mod.manually_move_obstacle(self.obstacle.obstacle_id, self.translation_vector)
+            is_c3_colliding = self.components[2].is_path_colliding(map_mod)
 
-        # Inflate obstacle by the robot footprint (actually, just get this inflation from the obstacle's properties)
+            if is_c3_colliding:
+                return True
 
-        # Check if all points for the path are neighbours
-        # -> if not, build the list of points using bresenham algorithm because
-        # all points only have 2 neighbours at once, it seems
-        # -> This gives the "pa obstacle more ?
+        return False
 
-
-        # FOREACH point of the "path line", check that it is not part of the inflated obstacle
-        # -> As soon as an intersection point is found, return True
-        # return False at the end of the loop
-
-        # You might need to add an "from obstacle import Obstacle"th line"
-        # May be interesting to inflate the path ?
-        # Or rather inflate the obstacle more ?
-
-
-        # FOREACH point of the "path line", check that it is not part of the inflated obstacle
-        # -> As soon as an intersection point is found, return True
-        # return False at the end of the loop
-
-        # You might need to add an "from obstacle import Obstacle"
+    def get_next_step(self):
+        # If there still are poses to go to in the current plan component
+        if self._step_counter + 1 < len(self.components[self.next_step_component].path.poses):
+            self._step_counter = self._step_counter + 1
+            self.next_step = self.components[self.next_step_component].path.poses[self._step_counter]
+        else:
+            # Else if there are still other components after the current plan component
+            if self.next_step_component + 1 < len(self.components):
+                self.next_step_component = self.next_step_component + 1
+                self._step_counter = 0
+                self.next_step = self.components[self.next_step_component].path.poses[self._step_counter]
+            else:
+                self.next_step = None
+        return self.next_step

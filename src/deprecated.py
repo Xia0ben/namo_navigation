@@ -8,7 +8,7 @@
 #                         distance * math.sin(angle)])
 #
 # def scan_callback(self, laserscan):
-#     time  = rospy.Time(0) # Makes sure same tf is used for calls
+#     time  = rospy.Time.now() # Makes sure same tf is used for calls
 #
 #     robot_pose = None
 #     # Get robot pose
@@ -158,7 +158,7 @@ class Obstacle:
         self.ros_point_cloud = PointCloud()
         self.ros_point_cloud.header.seq = 1
         self.ros_point_cloud.header.frame_id = frame_id
-        self.ros_point_cloud.header.stamp = rospy.Time(0)
+        self.ros_point_cloud.header.stamp = rospy.Time.now()
         self.ros_point_cloud.points = []
         for point in points_set:
             new_point32 = Point32()
@@ -170,7 +170,7 @@ class Obstacle:
         # Create pose from centroid of shapely polygon
         self.pose = PoseStamped()
         self.pose.header.seq = 1
-        self.pose.header.stamp = rospy.Time(0)
+        self.pose.header.stamp = rospy.Time.now()
         self.pose.header.frame_id = frame_id
         self.pose.pose.position.x = shapely_multipoint.convex_hull.centroid.x
         self.pose.pose.position.y = shapely_multipoint.convex_hull.centroid.y
@@ -216,7 +216,7 @@ class Obstacle:
     #     ros_point_cloud = PointCloud()
     #     ros_point_cloud.header.seq = 1
     #     ros_point_cloud.header.frame_id = frame_id
-    #     ros_point_cloud.header.stamp = rospy.Time(0)
+    #     ros_point_cloud.header.stamp = rospy.Time.now()
 
     #     points32 = []
     #     for point in map_points:

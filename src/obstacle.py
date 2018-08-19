@@ -80,11 +80,11 @@ class Obstacle:
                           int(coords[1][0] / self.map_metadata.resolution),  # x2
                           int(coords[1][1] / self.map_metadata.resolution))) # y2
         else:
-            Utils.debug_publish_shapely_as_ros_polygon(manipulation_polygon.envelope, "/simulated/debug_polygon")
+            # Utils.debug_publish_shapely_as_ros_polygon(manipulation_polygon.envelope, "/simulated/debug_polygon")
             x, y = manipulation_polygon.envelope.exterior.xy
             bb_top_left_corner = (int(min(x) / self.map_metadata.resolution), int(min(y) / self.map_metadata.resolution))
             bb_bottom_right_corner = (int(max(x) / self.map_metadata.resolution), int(max(y) / self.map_metadata.resolution))
-            Utils.debug_publish_map_coords({bb_top_left_corner, bb_bottom_right_corner}, "/simulated/debug_map_coords")
+            # Utils.debug_publish_map_coords({bb_top_left_corner, bb_bottom_right_corner}, "/simulated/debug_map_coords")
 
             # Check if manipulation causes to be out of map bounds
             # If yes, return empty set
@@ -98,9 +98,26 @@ class Obstacle:
                         if manipulation_polygon.contains(Point(corner)):
                             manipulation_area_map_points.add((i, j))
 
-        Utils.debug_publish_map_coords(manipulation_area_map_points, "/simulated/debug_map_coords")
+        # Utils.debug_publish_map_coords(manipulation_area_map_points, "/simulated/debug_map_coords")
 
         return manipulation_area_map_points
+
+    def compare(self, obstacle):
+        if obstacle.obstacle_id == self.obstacle_id and obstacle.points_set == self.points_set:
+            return True
+        return False
+
+    def is_obstacle_push_pose(self, push_pose_to_check):
+        for push_pose in self.push_poses:
+            if (push_pose.pose.position.x == push_pose_to_check.pose.position.x and
+                    push_pose.pose.position.y == push_pose_to_check.pose.position.y and
+                    push_pose.pose.position.z == push_pose_to_check.pose.position.z and
+                    push_pose.pose.orientation.x == push_pose_to_check.pose.orientation.x and
+                    push_pose.pose.orientation.y == push_pose_to_check.pose.orientation.y and
+                    push_pose.pose.orientation.z == push_pose_to_check.pose.orientation.z and
+                    push_pose.pose.orientation.w == push_pose_to_check.pose.orientation.w):
+                return True
+        return False
 
     def move(self, translation):
         points_set_after = set()
@@ -112,9 +129,16 @@ class Obstacle:
         # Update all other alternative representations
         self._update_alternate_representations()
 
-    def update(self, to_add_points_set, to_remove_points_set):
+    def add_points(self, to_add_points_set):
         # Update points_set
-        self.points_set = (self.points_set | to_add_points_set) - to_remove_points_set
+        self.points_set = self.points_set | to_add_points_set
+
+        # Update all other alternative representations
+        self._update_alternate_representations()
+
+    def remove_points(self, to_remove_points_set):
+        # Update points_set
+        self.points_set = self.points_set - to_remove_points_set
 
         # Update all other alternative representations
         self._update_alternate_representations()
@@ -192,7 +216,7 @@ class Obstacle:
         ros_point_cloud = PointCloud()
         ros_point_cloud.header.seq = 1
         ros_point_cloud.header.frame_id = self.frame_id
-        ros_point_cloud.header.stamp = rospy.Time(0)
+        ros_point_cloud.header.stamp = rospy.Time.now()
         ros_point_cloud.points = []
         ros_point_cloud.channels = [ChannelFloat32()]
         ros_point_cloud.channels[0].name = "obstacle_id"
@@ -208,7 +232,7 @@ class Obstacle:
     def _make_ros_pose(self, polygon):
         ros_pose = PoseStamped()
         ros_pose.header.seq = 1
-        ros_pose.header.stamp = rospy.Time(0)
+        ros_pose.header.stamp = rospy.Time.now()
         ros_pose.header.frame_id = self.frame_id
         ros_pose.pose.position.x = polygon.centroid.x
         ros_pose.pose.position.y = polygon.centroid.y
@@ -219,7 +243,7 @@ class Obstacle:
 
         push_poses = []
 
-        distance_from_border = resolution + self.robot_metadata.radius
+        distance_from_border = self.robot_metadata.radius + resolution / 10.0 # WORKAROUND
 
         if type(convex_hull) is Point:
             center = convex_hull
@@ -259,7 +283,7 @@ class Obstacle:
         for p_side_centroid, b_side_centroid in zip(polygon_sides_centroids, beveled_polygon_sides_centroids):
             new_push_pose = PoseStamped()
             new_push_pose.header.seq = 1
-            new_push_pose.header.stamp = rospy.Time(0)
+            new_push_pose.header.stamp = rospy.Time.now()
             new_push_pose.header.frame_id = self.frame_id
             new_push_pose.pose.position.x = b_side_centroid[0]
             new_push_pose.pose.position.y = b_side_centroid[1]

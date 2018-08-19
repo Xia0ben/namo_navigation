@@ -11,7 +11,9 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   actionlib_msgs
   nav_msgs
-  geometry_msgs 
+  geometry_msgs
+  std_msgs
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -55,11 +57,10 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  LocalGoalPose.srv
+)
 
 ## Generate actions in the 'action' folder
 add_action_files(
@@ -105,11 +106,14 @@ generate_messages(
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
+
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES namo_navigation
-#  CATKIN_DEPENDS rospy
-#  DEPENDS system_lib
+  CATKIN_DEPENDS
+  rospy
+  #  INCLUDE_DIRS include
+  #  LIBRARIES namo_navigation
+  #  CATKIN_DEPENDS rospy
+  #  DEPENDS system_lib
 )
 
 ###########

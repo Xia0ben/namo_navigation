@@ -33,26 +33,35 @@ class GlobalPlanner:
     def __init__(self):
         pass
 
-    def make_plan(self, occupancy_grid, start_pose, end_pose, resolution, frame_id):
-        start_grid_coords = Utils.map_coord_from_ros_pose(start_pose, resolution)
+    def make_plan(self, multilayered_map, start_pose, end_pose, authorize_goal_in_occupied_zone = False):
+        start_grid_coords = Utils.map_coord_from_ros_pose(start_pose, multilayered_map.info.resolution)
 
-        end_grid_coords = Utils.map_coord_from_ros_pose(end_pose, resolution)
+        end_grid_coords = Utils.map_coord_from_ros_pose(end_pose, multilayered_map.info.resolution)
+
+        if authorize_goal_in_occupied_zone:
+            intermediary_points = {(end_grid_coords[0] + 1, end_grid_coords[1]), (end_grid_coords[0] - 1, end_grid_coords[1]),
+                                   (end_grid_coords[0], end_grid_coords[1] + 1), (end_grid_coords[0], end_grid_coords[1] - 1)}
+            for point in intermediary_points:
+                if(Utils._is_in_matrix(point[0], point[1], len(multilayered_map.merged_occ_grid), len(multilayered_map.merged_occ_grid[0])) and
+                        multilayered_map.merged_occ_grid[point[0]][point[1]] < Utils.ROS_COST_POSSIBLY_CIRCUMSCRIBED):
+                    end_grid_coords = point
+                    break
 
         # Execute A*
-        astar_path = self.astar(occupancy_grid, start_grid_coords, end_grid_coords, restrictTo4Neighbors = False)
+        astar_path = self.astar(multilayered_map.merged_occ_grid, start_grid_coords, end_grid_coords, restrictTo4Neighbors = False)
 
         # Convert A* output to standard ROS path
-        ros_path = Utils.ros_path_from_map_path(astar_path, start_pose, end_pose, resolution, frame_id)
+        ros_path = Utils.ros_path_from_map_path(astar_path, start_pose, end_pose, multilayered_map.info.resolution, multilayered_map.frame_id)
 
         return ros_path
 
 
     def _dist_between(self, a, b):
-        return self._manhattan_distance(a, b)
+        return self._euclidean_distance(a, b)
 
 
     def _heuristic_cost_estimate(self, a, b):
-        return self._manhattan_distance(a, b)
+        return self._euclidean_distance(a, b)
 
 
     def _euclidean_distance(self, a, b):
