@@ -1,0 +1,4 @@
+shapely>=1.6
+numpy>=1.0
+sortedcontainers>=2.0
+bresenham>=0.2

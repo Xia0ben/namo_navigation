@@ -162,6 +162,7 @@ class NavManager:
                 self.make_plan(r_cur, r_goal, map_cur, obstacles, blocked_obstacles, p_opt, eu_cost_l, min_cost_l)
                 Utils.debug_erase_partial_paths()
                 Utils.publish_plan(p_opt[0])
+                pass
 
             # Stop condition if no plan is found
             if p_opt[0].cost >= float("inf"):
@@ -349,6 +350,6 @@ if __name__ == '__main__':
     while not nav_manager.is_ready:
         rate.sleep()
 
-    # nav_manager.manually_set_goal_robot_pose_from_map_coordinates_yaw(20, 4, 0.0)
+    nav_manager.manually_set_goal_robot_pose_from_map_coordinates_yaw(20, 4, 0.0)
 
     rospy.spin()

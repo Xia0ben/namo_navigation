@@ -9,7 +9,7 @@ from obstacle import Movability
 from shapely.geometry import Point
 import copy
 from namo_navigation.srv import LocalGoalPose, LocalGoalPoseResponse
-
+from nav_manager import NavManager
 
 class RobotPlacementException(Exception):
     pass
@@ -248,6 +248,18 @@ if __name__ == "__main__":
     frequency = 20.0 # [Hz]
     time_delta = 1.0 / frequency # [s]
     rate = rospy.Rate(frequency)
+
+    nav_manager = NavManager(robot_radius=0.05,
+                             robot_fov_radius=0.4,
+                             static_map_topic="/map",
+                             merged_occ_grid_topic="/robot_occ_grid",
+                             push_poses_topic="/simulated/all_push_poses",
+                             goal_topic="/move_base_simple/goal",
+                             simulated_pose_topic="/simulated/pose",
+                             simulated_fov_pointcloud_topic="/simulated/fov_pointcloud",
+                             local_goal_pose_topic="/local_goal_pose")
+
+    Utils.clean_up_viz()
 
     # simulated_local_goal_pose_pub = rospy.Publisher("/local_goal_pose", PoseStamped, queue_size=1)
     # counter = 0
