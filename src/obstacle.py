@@ -12,7 +12,6 @@ import math
 Movability = Enum('Movability', 'maybe_movable movable unmovable')
 
 class Obstacle:
-    obstacle_id_counter = 1
 
     def __init__(self, points_set, map_metadata, frame_id, robot_metadata, obstacle_id, movability, axis_rect_hypothesis = True):
         # Copy obstacle representations from parameters

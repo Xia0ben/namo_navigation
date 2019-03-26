@@ -8,8 +8,6 @@ import copy
 
 
 class Utils:
-    TF_LISTENER = tf.TransformListener()
-
     # UINT_TO_INT = 128
     # ROS_COST_LETHAL = 254 - UINT_TO_INT
     # ROS_COST_INSCRIBED = 253 - UINT_TO_INT
@@ -35,38 +33,8 @@ class Utils:
         while True:
             connections = publisher.get_num_connections()
             if connections > 0:
-                publisher.publish(payload)
+                publisher.publish_vel(payload)
                 break
-
-    @staticmethod
-    def get_current_pose(map_frame, robot_frame):
-
-        time  = rospy.Time.now() # Makes sure same tf is used for calls
-        robot_pose = PoseStamped()
-
-        while True:
-            try:
-                (position, quaternion) = Utils.TF_LISTENER.lookupTransform(map_frame, robot_frame, time)
-
-                robot_pose.header.seq = 1
-                robot_pose.header.stamp = rospy.Time.now()
-                robot_pose.header.frame_id = map_frame
-                robot_pose.pose.position.x = position[0]
-                robot_pose.pose.position.y = position[1]
-                robot_pose.pose.position.z = position[2]
-                robot_pose.pose.orientation.x = quaternion[0]
-                robot_pose.pose.orientation.y = quaternion[1]
-                robot_pose.pose.orientation.z = quaternion[2]
-                robot_pose.pose.orientation.w = quaternion[3]
-
-                break
-
-            except (tf.Exception, tf.LookupException, tf.ConnectivityException):
-                rospy.loginfo("Couldn't get robot pose in map : transform unavailable. \
-                Maybe amcl is not working and there is no transform between \
-                /odom and /map ?")
-
-        return robot_pose
 
     @staticmethod
     def yaw_from_geom_quat(geom_quat):
@@ -397,5 +365,5 @@ class Utils:
         ros_occ_grid.header = header
         ros_occ_grid.header.stamp = rospy.Time.now()
         ros_occ_grid.info = info
-        ros_occ_grid.data = list(map(int, np.flipud(np.rot90(matrix, 1)).flatten()))
+        ros_occ_grid.data = list(map(int, np.rot90(matrix, 1).flatten()))
         return ros_occ_grid

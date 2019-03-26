@@ -50,7 +50,6 @@ class NavManager:
         self.local_goal_pose_pub = rospy.Publisher(self.local_goal_pose_topic, PoseStamped, queue_size=1)
 
     def _get_safe_swept_area(self, obstacle, translation_vector, occupancy_grid):
-        # FIXME Don't just get manipulation area from obstacle polygon but also robot polygon, therefore, the method should move into MultilayeredMap class
         manipulation_area_map_points = obstacle.get_manipulation_area_map_points(translation_vector)
 
         # If any manipulation area map point is occupied by an obstacle, then
@@ -131,6 +130,8 @@ class NavManager:
             self.global_planner.make_plan(map_cur, r_cur, r_goal), False, self.MOVE_COST)])]
 
         Utils.publish_plan(p_opt[0])
+
+        pass
 
         while not self._is_same_pose(r_cur, r_goal):
             map_cur = self.map_manager.get_map_copy()
