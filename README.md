@@ -8,7 +8,7 @@ This repository contains our implementation of the algorithms presented in [our 
 
 ## Prerequisites
 
-You will need a [ROS](http://www.ros.org/) https://github.com/occiware/OCCInterface.gitinstallation to run this simulation. For this you can either:
+You will need a [ROS](http://www.ros.org/) to run this simulation. For this you can either:
 
 - Use a local install by following installation instructions from the original [ROS documentation](http://wiki.ros.org/kinetic/Installation/Ubuntu).
 
